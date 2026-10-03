@@ -1,0 +1,9 @@
+node_modules/
+dist/
+build/icon.iconset/
+*.dmg
+*.exe
+*.mp4
+scratch/
+.DS_Store
+*.log

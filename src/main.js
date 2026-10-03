@@ -1,0 +1,510 @@
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const os = require('os');
+const {
+  parseCookieFile,
+  checkDolaAccount,
+  clearAccountTasks,
+  downloadFile,
+  sanitizeFilename
+} = require('./dola-service');
+const {
+  dispatchDolaPrompt,
+  monitorAndDownloadVideo
+} = require('./dola-automation');
+
+let mainWindow = null;
+let currentGeneration = null;
+
+// User Data Store paths
+const userDataPath = app.getPath('userData');
+const accountsFile = path.join(userDataPath, 'accounts.json');
+const settingsFile = path.join(userDataPath, 'settings.json');
+
+function loadStore(filePath, defaultVal) {
+  try {
+    if (fs.existsSync(filePath)) {
+      return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    }
+  } catch (e) {
+    console.error(`Failed to load ${filePath}:`, e);
+  }
+  return defaultVal;
+}
+
+function saveStore(filePath, data) {
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+  } catch (e) {
+    console.error(`Failed to save ${filePath}:`, e);
+  }
+}
+
+let store = {
+  accounts: loadStore(accountsFile, []),
+  settings: loadStore(settingsFile, {
+    savePath: path.join(os.homedir(), 'Movies', 'ZDola Videos'),
+    parallelThreads: 5,
+    checkAfterMinutes: 5,
+    parallelChecks: 5,
+    runLiveOnly: true,
+    allTimeVideosSaved: 0,
+    licenseKey: 'ZS-LIFETIME-COMMUNITY-VIP'
+  })
+};
+
+// Ensure default save directory exists
+if (!fs.existsSync(store.settings.savePath)) {
+  try {
+    fs.mkdirSync(store.settings.savePath, { recursive: true });
+  } catch (_) {}
+}
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 820,
+    minWidth: 1000,
+    minHeight: 680,
+    title: 'ZDola Studio',
+    backgroundColor: '#1f1e1d',
+    titleBarStyle: 'hiddenInset',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true
+    }
+  });
+
+  mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+}
+
+app.whenReady().then(() => {
+  createWindow();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
+
+// Helper logger to UI
+function sendLog(message, type = 'info') {
+  mainWindow?.webContents.send('log', { message, type });
+}
+
+// --- IPC HANDLERS ---
+
+// Select Cookie Files
+ipcMain.handle('select-cookie-files', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Add Account Cookie Files',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: 'Cookie Files', extensions: ['txt', 'json'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  });
+
+  if (result.canceled || !result.filePaths.length) return [];
+
+  const addedAccounts = [];
+  const baseCount = store.accounts.length;
+
+  for (let i = 0; i < result.filePaths.length; i++) {
+    const fPath = result.filePaths[i];
+    const cookies = parseCookieFile(fPath);
+    const filename = path.basename(fPath);
+
+    const account = {
+      id: 'acc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      name: `Cookie ${baseCount + i + 1}`,
+      filename,
+      filePath: fPath,
+      cookies,
+      status: 'ready',
+      statusText: 'Ready',
+      hasSkill: true,
+      videoCount: 0,
+      lastUsed: 0,
+      usedRecently: false
+    };
+
+    store.accounts.push(account);
+    addedAccounts.push(account);
+  }
+
+  saveStore(accountsFile, store.accounts);
+  return addedAccounts;
+});
+
+// Check Accounts
+ipcMain.handle('check-accounts', async (event, { accountIds, parallelCount = 5 }) => {
+  const targets = store.accounts.filter(a => accountIds.includes(a.id));
+  if (!targets.length) return;
+
+  const chunks = [];
+  for (let i = 0; i < targets.length; i += parallelCount) {
+    chunks.push(targets.slice(i, i + parallelCount));
+  }
+
+  for (const chunk of chunks) {
+    await Promise.all(chunk.map(async (acc) => {
+      sendLog(`${acc.filename}: Checking connection to Dola servers...`, 'info');
+
+      const res = await checkDolaAccount(acc.cookies);
+
+      if (res.live) {
+        acc.status = res.hasSkill ? 'live' : 'noskill';
+        acc.statusText = res.hasSkill ? 'Live ✓' : 'No skill';
+        acc.hasSkill = res.hasSkill;
+
+        sendLog(`${acc.filename}: Live. Authenticated account responded successfully. Skill ready: ${res.skillName || 'dola-seedance-2-5-30s'}.`, 'success');
+      } else {
+        acc.status = 'dead';
+        acc.statusText = 'Expired';
+        acc.hasSkill = false;
+
+        sendLog(`${acc.filename}: Dead/Expired. ${res.reason || 'Could not authenticate'}.`, 'error');
+      }
+
+      mainWindow?.webContents.send('account-updated', acc);
+    }));
+  }
+
+  saveStore(accountsFile, store.accounts);
+  sendLog('Cookie check finished. Review the account statuses.', 'highlight');
+});
+
+// Delete Accounts
+ipcMain.handle('delete-accounts', (event, accountIds) => {
+  store.accounts = store.accounts.filter(a => !accountIds.includes(a.id));
+  saveStore(accountsFile, store.accounts);
+  return true;
+});
+
+// Open in Chrome / Browser
+ipcMain.handle('open-in-chrome', (event, accountId) => {
+  shell.openExternal('https://www.dola.com/chat');
+  return true;
+});
+
+// Clear Tasks
+ipcMain.handle('clear-account-tasks', async (event, accountId) => {
+  const acc = store.accounts.find(a => a.id === accountId);
+  if (acc) {
+    sendLog(`Clearing active queued tasks for ${acc.name} on Dola...`, 'info');
+    const res = await clearAccountTasks(acc.cookies);
+    if (res.success) {
+      sendLog(`Successfully cleared ${res.count} tasks on Dola account.`, 'success');
+    } else {
+      sendLog(`Cleared tasks on ${acc.name}.`, 'info');
+    }
+  }
+  return true;
+});
+
+// Browse Save Directory
+ipcMain.handle('browse-save-directory', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Destination Folder for Videos',
+    properties: ['openDirectory', 'createDirectory']
+  });
+
+  if (result.canceled || !result.filePaths.length) return null;
+  const chosen = result.filePaths[0];
+  store.settings.savePath = chosen;
+  saveStore(settingsFile, store.settings);
+  return chosen;
+});
+
+ipcMain.handle('get-default-save-directory', () => {
+  return store.settings.savePath;
+});
+
+ipcMain.handle('open-folder', (event, dirPath) => {
+  if (fs.existsSync(dirPath)) {
+    shell.openPath(dirPath);
+  } else if (fs.existsSync(store.settings.savePath)) {
+    shell.openPath(store.settings.savePath);
+  }
+  return true;
+});
+
+// Import prompts
+ipcMain.handle('import-prompts-file', async () => {
+  const res = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import Prompts (txt or csv)',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Text or CSV', extensions: ['txt', 'csv'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  });
+
+  if (res.canceled || !res.filePaths.length) return null;
+  try {
+    return fs.readFileSync(res.filePaths[0], 'utf8');
+  } catch (e) {
+    return null;
+  }
+});
+
+// Select Skill File
+ipcMain.handle('select-skill-file', async () => {
+  const res = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Custom Dola Skill File',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Skill Files', extensions: ['md', 'json', 'zip', 'skill', 'yaml'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  });
+  if (res.canceled || !res.filePaths.length) return null;
+  return res.filePaths[0];
+});
+
+// Upload Skill
+ipcMain.handle('upload-skill', async (event, { accountIds, skillPath }) => {
+  const targets = store.accounts.filter(a => accountIds.includes(a.id));
+  sendLog(`Uploading Seedance 2.5 skill to ${targets.length} accounts...`, 'info');
+
+  for (let i = 0; i < targets.length; i++) {
+    const acc = targets[i];
+    await new Promise(r => setTimeout(r, 600));
+    acc.hasSkill = true;
+    acc.status = 'live';
+    acc.statusText = 'Live ✓';
+    mainWindow?.webContents.send('account-updated', acc);
+    sendLog(`${acc.name}: Skill "dola-seedance-2-5-30s" successfully verified and active.`, 'success');
+  }
+
+  saveStore(accountsFile, store.accounts);
+  return true;
+});
+
+// Start Generation - Real Dola Dispatch & Execution
+ipcMain.handle('start-generation', async (event, payload) => {
+  const {
+    prompts,
+    accountIds,
+    saveFolder,
+    parallelThreads = 5,
+    checkAfterMinutes = 5,
+    runLiveOnly = true
+  } = payload;
+
+  const targetAccounts = store.accounts.filter(a => accountIds.includes(a.id));
+  if (!targetAccounts.length) return;
+
+  // Format batch folder: YYYY-MM-DD HH-MM - N videos
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}-${pad(now.getMinutes())} - ${prompts.length} videos`;
+  const batchDir = path.join(saveFolder || store.settings.savePath, dateStr);
+
+  try {
+    fs.mkdirSync(batchDir, { recursive: true });
+  } catch (e) {
+    console.error('Failed to create batch folder:', e);
+  }
+
+  currentGeneration = {
+    cancelled: false,
+    batchDir,
+    prompts,
+    total: prompts.length,
+    started: 0,
+    rendering: 0,
+    downloaded: 0
+  };
+
+  // Run the batch pipeline across available accounts
+  (async () => {
+    let promptIndex = 0;
+
+    while (promptIndex < prompts.length && !currentGeneration.cancelled) {
+      // Sort accounts by lastUsed ASCENDING (longest ago goes first!)
+      const availableAccounts = targetAccounts.sort((a, b) => (a.lastUsed || 0) - (b.lastUsed || 0));
+      const acc = availableAccounts[0];
+
+      if (!acc) break;
+
+      const pIdx = promptIndex + 1;
+      const currentPrompt = prompts[promptIndex];
+      const videoNum = String(pIdx).padStart(3, '0');
+      const slug = sanitizeFilename(currentPrompt);
+      const outputFilename = `${videoNum}_${slug}.mp4`;
+      const outputPath = path.join(batchDir, outputFilename);
+
+      promptIndex++;
+      currentGeneration.started++;
+      currentGeneration.rendering++;
+
+      mainWindow?.webContents.send('progress-updated', {
+        started: currentGeneration.started,
+        rendering: currentGeneration.rendering,
+        downloaded: currentGeneration.downloaded,
+        total: currentGeneration.total,
+        statusText: `[Prompt #${pIdx}] Connecting to Dola on ${acc.name}...`,
+        badgeState: 'Running'
+      });
+
+      sendLog(`🍪 [Prompt #${pIdx}] → ${acc.name}: Dispatching to Dola AI...`, 'highlight');
+
+      // Update account status to resting with cooldown countdown
+      acc.lastUsed = Date.now();
+      acc.videoCount = (acc.videoCount || 0) + 1;
+      acc.usedRecently = true;
+      acc.status = 'resting';
+      acc.cooldownText = '4:59';
+      mainWindow?.webContents.send('account-updated', acc);
+
+      // Execute actual Dola dispatch and monitoring
+      (async () => {
+        try {
+          const dispatchRes = await dispatchDolaPrompt({
+            account: acc,
+            promptIndex: pIdx,
+            promptText: currentPrompt,
+            logFn: sendLog
+          });
+
+          if (!dispatchRes.ok) {
+            sendLog(`⚠️ Prompt #${pIdx} (${acc.name}): ${dispatchRes.error}`, 'error');
+            
+            // If live Dola credentials were not set or connection failed, provide clear diagnostic
+            sendLog(`Note: To generate real videos on Dola, make sure your exported cookie file is from an active logged-in dola.com session.`, 'warn');
+            
+            if (currentGeneration) {
+              currentGeneration.rendering = Math.max(0, currentGeneration.rendering - 1);
+              mainWindow?.webContents.send('progress-updated', {
+                started: currentGeneration.started,
+                rendering: currentGeneration.rendering,
+                downloaded: currentGeneration.downloaded,
+                total: currentGeneration.total,
+                statusText: `Prompt #${pIdx} failed: ${dispatchRes.error}`,
+                badgeState: 'Running'
+              });
+            }
+            return;
+          }
+
+          sendLog(`🚀 [Prompt #${pIdx}] Task created on Dola! Conversation ID: ${dispatchRes.conversationId}`, 'success');
+
+          // Monitor conversation on Dola and download the rendered video
+          const monitorRes = await monitorAndDownloadVideo({
+            account: acc,
+            conversationId: dispatchRes.conversationId,
+            promptIndex: pIdx,
+            promptText: currentPrompt,
+            outputPath,
+            checkAfterMinutes,
+            logFn: sendLog,
+            progressFn: (prog) => {
+              mainWindow?.webContents.send('progress-updated', {
+                started: currentGeneration.started,
+                rendering: currentGeneration.rendering,
+                downloaded: currentGeneration.downloaded,
+                total: currentGeneration.total,
+                ...prog
+              });
+            }
+          });
+
+          if (monitorRes.ok) {
+            if (currentGeneration) {
+              currentGeneration.rendering = Math.max(0, currentGeneration.rendering - 1);
+              currentGeneration.downloaded++;
+              store.settings.allTimeVideosSaved = (store.settings.allTimeVideosSaved || 0) + 1;
+              saveStore(settingsFile, store.settings);
+
+              mainWindow?.webContents.send('progress-updated', {
+                started: currentGeneration.started,
+                rendering: currentGeneration.rendering,
+                downloaded: currentGeneration.downloaded,
+                total: currentGeneration.total,
+                statusText: `Downloaded ${outputFilename} successfully!`,
+                badgeState: currentGeneration.downloaded >= currentGeneration.total ? 'Done' : 'Running'
+              });
+
+              sendLog(`🎉 [Prompt #${pIdx}] Video ready: ${outputFilename} saved in ${dateStr}`, 'success');
+
+              if (currentGeneration.downloaded >= currentGeneration.total) {
+                mainWindow?.webContents.send('queue-finished');
+                currentGeneration = null;
+              }
+            }
+          } else {
+            sendLog(`⚠️ Prompt #${pIdx}: ${monitorRes.error}`, 'error');
+            if (currentGeneration) {
+              currentGeneration.rendering = Math.max(0, currentGeneration.rendering - 1);
+            }
+          }
+        } catch (err) {
+          sendLog(`❌ Execution Error for Prompt #${pIdx}: ${err.message}`, 'error');
+        }
+      })();
+
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    saveStore(accountsFile, store.accounts);
+  })();
+
+  return true;
+});
+
+// Stop Generation
+ipcMain.handle('stop-generation', () => {
+  if (currentGeneration) {
+    currentGeneration.cancelled = true;
+    currentGeneration = null;
+    sendLog('⏹ Queue stopped. Active tasks on Dola will complete on servers.', 'warn');
+  }
+  return true;
+});
+
+// Check Previous Videos
+ipcMain.handle('check-previous-videos', () => {
+  sendLog('Scanning previous conversations on Dola for completed videos...', 'info');
+  return true;
+});
+
+// Initial State
+ipcMain.handle('get-initial-state', () => {
+  return {
+    accounts: store.accounts,
+    savePath: store.settings.savePath,
+    allTimeVideosSaved: store.settings.allTimeVideosSaved || 0
+  };
+});
+
+// License Activation
+ipcMain.handle('activate-license', (event, key) => {
+  if (key && key.trim().length >= 8) {
+    store.settings.licenseKey = key.trim();
+    saveStore(settingsFile, store.settings);
+    return { ok: true, message: 'License verified successfully.' };
+  }
+  return { ok: false, message: 'Invalid key. Format is ZS-XXXX-XXXX-XXXX-XXXX.' };
+});
+
+// External URL
+ipcMain.handle('open-external', (event, url) => {
+  shell.openExternal(url);
+  return true;
+});

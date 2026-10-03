@@ -1,0 +1,71 @@
+{
+  "name": "zdola-studio",
+  "productName": "ZDola Studio",
+  "version": "1.2.9",
+  "description": "Unlimited 30-second Seedance 2.5 videos with ZDola Studio",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "build:mac": "electron-builder --mac dmg",
+    "build:dmg": "electron-builder --mac dmg --publish never"
+  },
+  "keywords": [
+    "zdola",
+    "dola",
+    "seedance",
+    "ai",
+    "video-generator"
+  ],
+  "author": "Zakariya Studio",
+  "license": "Commercial",
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.zakariyastudio.zdolastudio",
+    "productName": "ZDola Studio",
+    "copyright": "Copyright © 2026 Zakariya Studio",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "mac": {
+      "category": "public.app-category.video",
+      "target": [
+        "dmg"
+      ],
+      "icon": "build/icon.icns",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "identity": null
+    },
+    "dmg": {
+      "title": "ZDola Studio",
+      "icon": "build/icon.icns",
+      "contents": [
+        {
+          "x": 140,
+          "y": 240,
+          "type": "file"
+        },
+        {
+          "x": 420,
+          "y": 240,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 560,
+        "height": 400
+      }
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ]
+  }
+}
