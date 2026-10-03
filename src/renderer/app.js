@@ -111,13 +111,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnCopyLog: document.getElementById('btnCopyLog'),
     logConsole: document.getElementById('logConsole'),
 
-    // Modal
+    // Modal Key
     modalKey: document.getElementById('modalKey'),
     btnCloseModal: document.getElementById('btnCloseModal'),
     btnCancelKey: document.getElementById('btnCancelKey'),
     btnConfirmKey: document.getElementById('btnConfirmKey'),
     inputLicenseKey: document.getElementById('inputLicenseKey'),
-    linkZakariya: document.getElementById('linkZakariya')
+    linkZakariya: document.getElementById('linkZakariya'),
+
+    // Modal Paste Cookies
+    btnPasteCookies: document.getElementById('btnPasteCookies'),
+    modalPasteCookies: document.getElementById('modalPasteCookies'),
+    btnClosePasteCookies: document.getElementById('btnClosePasteCookies'),
+    btnCancelPasteCookies: document.getElementById('btnCancelPasteCookies'),
+    btnConfirmPasteCookies: document.getElementById('btnConfirmPasteCookies'),
+    inputAccountName: document.getElementById('inputAccountName'),
+    txtPasteCookies: document.getElementById('txtPasteCookies'),
+
+    // Modal Previous Videos
+    modalPreviousVideos: document.getElementById('modalPreviousVideos'),
+    btnClosePreviousVideos: document.getElementById('btnClosePreviousVideos'),
+    batchListContainer: document.getElementById('batchListContainer'),
+    batchEmptyState: document.getElementById('batchEmptyState'),
+    batchDetailsHeader: document.getElementById('batchDetailsHeader'),
+    selectedBatchTitle: document.getElementById('selectedBatchTitle'),
+    selectedBatchBadge: document.getElementById('selectedBatchBadge'),
+    selectedBatchPath: document.getElementById('selectedBatchPath'),
+    batchVideosContainer: document.getElementById('batchVideosContainer'),
+    btnOpenSelectedBatchFolder: document.getElementById('btnOpenSelectedBatchFolder'),
+    btnCheckAndDownloadBatch: document.getElementById('btnCheckAndDownloadBatch')
   };
 
   // --- THEME HANDLING ---
@@ -630,11 +652,165 @@ document.addEventListener('DOMContentLoaded', async () => {
     el.activitySub.textContent = 'Generation stopped by user.';
   });
 
+  // --- PASTE COOKIES MODAL ---
+  el.btnPasteCookies.addEventListener('click', () => {
+    el.inputAccountName.value = `Account ${state.accounts.length + 1}`;
+    el.txtPasteCookies.value = '';
+    el.modalPasteCookies.style.display = 'flex';
+  });
+
+  el.btnClosePasteCookies.addEventListener('click', () => {
+    el.modalPasteCookies.style.display = 'none';
+  });
+
+  el.btnCancelPasteCookies.addEventListener('click', () => {
+    el.modalPasteCookies.style.display = 'none';
+  });
+
+  el.btnConfirmPasteCookies.addEventListener('click', async () => {
+    const rawText = el.txtPasteCookies.value.trim();
+    if (!rawText) return;
+    const name = el.inputAccountName.value.trim() || `Account ${state.accounts.length + 1}`;
+    if (window.zdolaAPI) {
+      const res = await window.zdolaAPI.addRawCookies(name, rawText);
+      if (res && res.success) {
+        state.accounts.push(res.account);
+        state.selectedAccountIds.add(res.account.id);
+        renderAccountsList();
+        addLog(`Added ${res.account.name} with ${res.account.cookies?.length || 0} cookies.`, 'success');
+        el.modalPasteCookies.style.display = 'none';
+      } else {
+        alert(res?.error || 'Failed to parse cookies. Ensure cookies are in valid format.');
+      }
+    }
+  });
+
+  // --- PREVIOUS VIDEOS / BATCH HISTORY MODAL ---
+  let selectedBatch = null;
+
   el.btnPreviousVideos.addEventListener('click', async () => {
-    addLog('Checking previous videos on accounts...', 'info');
+    await openBatchHistoryModal();
+  });
+
+  el.btnClosePreviousVideos.addEventListener('click', () => {
+    el.modalPreviousVideos.style.display = 'none';
+  });
+
+  async function openBatchHistoryModal() {
+    el.modalPreviousVideos.style.display = 'flex';
+    if (!window.zdolaAPI) return;
+    const batches = await window.zdolaAPI.getBatchHistory();
+    renderBatchList(batches || []);
+  }
+
+  function renderBatchList(batches) {
+    el.batchListContainer.innerHTML = '';
+    if (!batches || !batches.length) {
+      el.batchEmptyState.style.display = 'block';
+      el.batchDetailsHeader.style.display = 'none';
+      el.batchVideosContainer.innerHTML = '<div class="empty-state" style="padding: 40px 0; text-align: center; color: var(--text-muted);">No saved batches yet.</div>';
+      el.btnOpenSelectedBatchFolder.disabled = true;
+      return;
+    }
+
+    el.batchEmptyState.style.display = 'none';
+
+    batches.forEach((batch, index) => {
+      const card = document.createElement('div');
+      card.className = `batch-item-card ${selectedBatch?.batch_id === batch.batch_id || (!selectedBatch && index === 0) ? 'active' : ''}`;
+      
+      const date = new Date(batch.created_at);
+      const dateStr = date.toLocaleDateString('en-US', { day: '2-digit', month: 'short' }) + ' ' + date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+      
+      const completedCount = (batch.jobs || []).filter(j => j.status === 'completed').length;
+      const totalCount = batch.target_count || (batch.jobs || []).length;
+      
+      card.innerHTML = `
+        <div class="batch-item-title">
+          <span>${dateStr}</span>
+          <span style="font-size: 11px; color: ${completedCount === totalCount ? '#4caf50' : 'var(--text-muted)'}">${completedCount}/${totalCount}</span>
+        </div>
+        <div class="batch-item-meta">${totalCount} videos · ${completedCount} saved</div>
+      `;
+
+      card.addEventListener('click', () => {
+        document.querySelectorAll('.batch-item-card').forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+        selectBatch(batch);
+      });
+
+      el.batchListContainer.appendChild(card);
+    });
+
+    if (!selectedBatch && batches.length) {
+      selectBatch(batches[0]);
+    } else if (selectedBatch) {
+      const current = batches.find(b => b.batch_id === selectedBatch.batch_id);
+      if (current) selectBatch(current);
+    }
+  }
+
+  function selectBatch(batch) {
+    selectedBatch = batch;
+    el.batchDetailsHeader.style.display = 'block';
+    
+    const date = new Date(batch.created_at);
+    el.selectedBatchTitle.textContent = `Batch: ${date.toLocaleString()}`;
+    
+    const completedCount = (batch.jobs || []).filter(j => j.status === 'completed').length;
+    const totalCount = batch.target_count || (batch.jobs || []).length;
+    el.selectedBatchBadge.textContent = `${completedCount} of ${totalCount} saved`;
+    el.selectedBatchPath.textContent = batch.output_folder || '';
+    el.btnOpenSelectedBatchFolder.disabled = !batch.output_folder;
+
+    el.batchVideosContainer.innerHTML = '';
+    const jobs = batch.jobs || [];
+    if (!jobs.length) {
+      el.batchVideosContainer.innerHTML = '<div class="empty-state" style="padding: 20px 0; text-align: center; color: var(--text-muted);">No videos recorded in this batch.</div>';
+      return;
+    }
+
+    jobs.forEach(job => {
+      const row = document.createElement('div');
+      row.className = 'batch-video-row';
+      
+      const sizeStr = job.video_size ? `${(job.video_size / (1024 * 1024)).toFixed(1)} MB` : '';
+      const statusLabel = job.status === 'completed' ? 'Saved ✓' : (job.status === 'rendering' ? 'Rendering ⏳' : (job.status === 'failed' ? 'Failed ✕' : 'Pending'));
+
+      row.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px; overflow: hidden;">
+          <span style="font-size: 11px; color: var(--text-muted); min-width: 20px;">#${job.prompt_idx}</span>
+          <span class="batch-video-title" title="${job.video_filename || job.prompt}">${job.video_filename || job.prompt}</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 11px; color: var(--text-muted);">${sizeStr}</span>
+          <span class="batch-video-status ${job.status}">${statusLabel}</span>
+        </div>
+      `;
+
+      row.addEventListener('dblclick', async () => {
+        if (job.video_path && window.zdolaAPI) {
+          await window.zdolaAPI.openVideoFile(job.video_path);
+        }
+      });
+
+      el.batchVideosContainer.appendChild(row);
+    });
+  }
+
+  el.btnOpenSelectedBatchFolder.addEventListener('click', async () => {
+    if (selectedBatch?.output_folder && window.zdolaAPI) {
+      await window.zdolaAPI.openBatchFolder(selectedBatch.output_folder);
+    }
+  });
+
+  el.btnCheckAndDownloadBatch.addEventListener('click', async () => {
+    addLog('Checking Dola conversations for ready videos...', 'info');
     if (window.zdolaAPI) {
       await window.zdolaAPI.checkPreviousVideos();
     }
+    const batches = await window.zdolaAPI.getBatchHistory();
+    renderBatchList(batches || []);
   });
 
   function updateActivityCounters() {

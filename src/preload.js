@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('zdolaAPI', {
   // Account operations
   selectCookieFiles: () => ipcRenderer.invoke('select-cookie-files'),
+  addRawCookies: (name, rawText) => ipcRenderer.invoke('add-raw-cookies', { name, rawText }),
   checkAccounts: (accountIds, parallelCount) => ipcRenderer.invoke('check-accounts', { accountIds, parallelCount }),
   deleteAccounts: (accountIds) => ipcRenderer.invoke('delete-accounts', accountIds),
   deleteDeadAccounts: () => ipcRenderer.invoke('delete-dead-accounts'),
@@ -19,10 +20,13 @@ contextBridge.exposeInMainWorld('zdolaAPI', {
   openFolder: (dirPath) => ipcRenderer.invoke('open-folder', dirPath),
   importPromptsFile: () => ipcRenderer.invoke('import-prompts-file'),
 
-  // Generation queue
+  // Generation queue & batches
   startGeneration: (payload) => ipcRenderer.invoke('start-generation', payload),
   stopGeneration: () => ipcRenderer.invoke('stop-generation'),
   checkPreviousVideos: () => ipcRenderer.invoke('check-previous-videos'),
+  getBatchHistory: () => ipcRenderer.invoke('get-batch-history'),
+  openVideoFile: (filePath) => ipcRenderer.invoke('open-video-file', filePath),
+  openBatchFolder: (folderPath) => ipcRenderer.invoke('open-batch-folder', folderPath),
 
   // Settings & state
   getSettings: () => ipcRenderer.invoke('get-settings'),

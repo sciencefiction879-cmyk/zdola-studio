@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const {
   parseCookieFile,
+  parseCookieContent,
   checkDolaAccount,
   clearAccountTasks,
   downloadFile,
@@ -11,7 +12,8 @@ const {
 } = require('./dola-service');
 const {
   dispatchDolaPrompt,
-  monitorAndDownloadVideo
+  monitorAndDownloadVideo,
+  createAccountBrowser
 } = require('./dola-automation');
 
 let mainWindow = null;
@@ -53,6 +55,39 @@ let store = {
     licenseKey: 'ZS-LIFETIME-COMMUNITY-VIP'
   })
 };
+
+// Batches Journal Storage (Previous Videos)
+const batchesDir = path.join(userDataPath, 'batches');
+if (!fs.existsSync(batchesDir)) {
+  try { fs.mkdirSync(batchesDir, { recursive: true }); } catch (_) {}
+}
+
+function saveBatchJournal(journal) {
+  try {
+    const file = path.join(batchesDir, `${journal.batch_id}.json`);
+    journal.updated_at = new Date().toISOString();
+    fs.writeFileSync(file, JSON.stringify(journal, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to save batch journal:', err);
+  }
+}
+
+function loadAllBatches() {
+  try {
+    if (!fs.existsSync(batchesDir)) return [];
+    const files = fs.readdirSync(batchesDir).filter(f => f.endsWith('.json'));
+    const list = [];
+    for (const f of files) {
+      try {
+        const content = fs.readFileSync(path.join(batchesDir, f), 'utf8');
+        list.push(JSON.parse(content));
+      } catch (_) {}
+    }
+    return list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  } catch (err) {
+    return [];
+  }
+}
 
 // Ensure default save directory exists
 if (!fs.existsSync(store.settings.savePath)) {
@@ -197,9 +232,49 @@ ipcMain.handle('delete-accounts', (event, accountIds) => {
 });
 
 // Open in Chrome / Browser
-ipcMain.handle('open-in-chrome', (event, accountId) => {
-  shell.openExternal('https://www.dola.com/chat');
+ipcMain.handle('open-in-chrome', async (event, accountId) => {
+  const acc = store.accounts.find(a => a.id === accountId);
+  if (acc) {
+    try {
+      const { win } = await createAccountBrowser(acc);
+      win.setSize(1280, 800);
+      win.center();
+      win.setTitle(`Dola AI - ${acc.name} (${acc.filename})`);
+      win.show();
+      await win.loadURL('https://www.dola.com/chat');
+    } catch (_) {
+      shell.openExternal('https://www.dola.com/chat');
+    }
+  } else {
+    shell.openExternal('https://www.dola.com/chat');
+  }
   return true;
+});
+
+// Add Raw Cookies / Pasted Session
+ipcMain.handle('add-raw-cookies', (event, { name, rawText }) => {
+  const cookies = parseCookieContent(rawText);
+  if (!cookies || !cookies.length) return { success: false, error: 'No valid cookies found.' };
+
+  const baseCount = store.accounts.length;
+  const account = {
+    id: 'acc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+    name: name || `Cookie ${baseCount + 1}`,
+    filename: `pasted_cookies_${baseCount + 1}.txt`,
+    filePath: '',
+    cookies,
+    status: 'ready',
+    statusText: 'Ready',
+    hasSkill: true,
+    videoCount: 0,
+    lastUsed: null,
+    usedRecently: false,
+    cooldownText: ''
+  };
+
+  store.accounts.push(account);
+  saveStore(accountsFile, store.accounts);
+  return { success: true, account };
 });
 
 // Clear Tasks
@@ -322,8 +397,20 @@ ipcMain.handle('start-generation', async (event, payload) => {
     console.error('Failed to create batch folder:', e);
   }
 
+  const batchId = `batch_${Date.now()}`;
+  const batchJournal = {
+    batch_id: batchId,
+    created_at: now.toISOString(),
+    updated_at: now.toISOString(),
+    target_count: prompts.length,
+    output_folder: batchDir,
+    jobs: []
+  };
+  saveBatchJournal(batchJournal);
+
   currentGeneration = {
     cancelled: false,
+    batchId,
     batchDir,
     prompts,
     total: prompts.length,
@@ -349,6 +436,22 @@ ipcMain.handle('start-generation', async (event, payload) => {
       const slug = sanitizeFilename(currentPrompt);
       const outputFilename = `${videoNum}_${slug}.mp4`;
       const outputPath = path.join(batchDir, outputFilename);
+
+      const jobRecord = {
+        prompt_idx: pIdx,
+        prompt: currentPrompt,
+        account_id: acc.id,
+        account_name: acc.name,
+        job_id: null,
+        conversation_id: null,
+        status: 'submitting',
+        video_filename: outputFilename,
+        video_path: outputPath,
+        video_size: 0,
+        error: null
+      };
+      batchJournal.jobs.push(jobRecord);
+      saveBatchJournal(batchJournal);
 
       promptIndex++;
       currentGeneration.started++;
@@ -384,6 +487,10 @@ ipcMain.handle('start-generation', async (event, payload) => {
           });
 
           if (!dispatchRes.ok) {
+            jobRecord.status = 'failed';
+            jobRecord.error = dispatchRes.error;
+            saveBatchJournal(batchJournal);
+
             sendLog(`⚠️ Prompt #${pIdx} (${acc.name}): ${dispatchRes.error}`, 'error');
             
             // If live Dola credentials were not set or connection failed, provide clear diagnostic
@@ -402,6 +509,11 @@ ipcMain.handle('start-generation', async (event, payload) => {
             }
             return;
           }
+
+          jobRecord.job_id = dispatchRes.jobId;
+          jobRecord.conversation_id = dispatchRes.conversationId;
+          jobRecord.status = 'rendering';
+          saveBatchJournal(batchJournal);
 
           sendLog(`🚀 [Prompt #${pIdx}] Task created on Dola! Conversation ID: ${dispatchRes.conversationId}`, 'success');
 
@@ -426,6 +538,10 @@ ipcMain.handle('start-generation', async (event, payload) => {
           });
 
           if (monitorRes.ok) {
+            jobRecord.status = 'completed';
+            try { jobRecord.video_size = fs.statSync(outputPath).size; } catch (_) {}
+            saveBatchJournal(batchJournal);
+
             if (currentGeneration) {
               currentGeneration.rendering = Math.max(0, currentGeneration.rendering - 1);
               currentGeneration.downloaded++;
@@ -449,12 +565,19 @@ ipcMain.handle('start-generation', async (event, payload) => {
               }
             }
           } else {
+            jobRecord.status = 'failed';
+            jobRecord.error = monitorRes.error;
+            saveBatchJournal(batchJournal);
+
             sendLog(`⚠️ Prompt #${pIdx}: ${monitorRes.error}`, 'error');
             if (currentGeneration) {
               currentGeneration.rendering = Math.max(0, currentGeneration.rendering - 1);
             }
           }
         } catch (err) {
+          jobRecord.status = 'failed';
+          jobRecord.error = err.message;
+          saveBatchJournal(batchJournal);
           sendLog(`❌ Execution Error for Prompt #${pIdx}: ${err.message}`, 'error');
         }
       })();
@@ -503,8 +626,32 @@ ipcMain.handle('activate-license', (event, key) => {
   return { ok: false, message: 'Invalid key. Format is ZS-XXXX-XXXX-XXXX-XXXX.' };
 });
 
+// Batch History (Previous Videos)
+ipcMain.handle('get-batch-history', () => {
+  return loadAllBatches();
+});
+
+// Open Video File
+ipcMain.handle('open-video-file', (event, filePath) => {
+  if (filePath && fs.existsSync(filePath)) {
+    shell.openPath(filePath);
+    return true;
+  }
+  return false;
+});
+
+// Open Batch Folder
+ipcMain.handle('open-batch-folder', (event, folderPath) => {
+  if (folderPath && fs.existsSync(folderPath)) {
+    shell.openPath(folderPath);
+    return true;
+  }
+  return false;
+});
+
 // External URL
 ipcMain.handle('open-external', (event, url) => {
   shell.openExternal(url);
   return true;
 });
+

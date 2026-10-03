@@ -61,9 +61,14 @@
           <p class="panel-subtitle">One cookie file for each account.</p>
         </div>
 
-        <button class="btn btn-primary btn-add-cookies" id="btnAddCookies">
-          + Add cookie files
-        </button>
+        <div class="add-cookies-button-group" style="display: flex; gap: 8px; margin-bottom: 12px;">
+          <button class="btn btn-primary btn-add-cookies" id="btnAddCookies" style="flex: 1;">
+            + Add cookie files
+          </button>
+          <button class="btn btn-subtle" id="btnPasteCookies" style="white-space: nowrap; font-size: 13px;">
+            + Paste cookies
+          </button>
+        </div>
 
         <div class="accounts-actions-row">
           <button class="btn-subtle" id="btnSelectAll">Select all</button>
@@ -343,6 +348,73 @@
         <button class="btn btn-primary" id="btnConfirmKey">Activate</button>
       </div>
       <p class="modal-foot">Keys lock to this PC. Need a key? Visit <a href="#" id="linkZakariya">zakariyastudio.com</a></p>
+    </div>
+  </div>
+
+  <!-- Paste Cookies Modal -->
+  <div class="modal-overlay" id="modalPasteCookies" style="display: none;">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Add Account from Cookies</h3>
+        <button class="modal-close" id="btnClosePasteCookies">×</button>
+      </div>
+      <p class="modal-sub">Paste exported cookies (Netscape format, Cookie header, or JSON array):</p>
+      <input type="text" id="inputAccountName" class="modal-input" placeholder="Account Name (e.g. Account 1)" style="margin-bottom: 8px;">
+      <textarea id="txtPasteCookies" class="prompt-textarea" style="height: 140px; font-family: monospace; font-size: 11px;" placeholder="# Netscape HTTP Cookie File&#10;.dola.com	TRUE	/	TRUE	1791024258	session	...&#10;OR&#10;cookie_name=value; other_cookie=value..."></textarea>
+      <div class="modal-actions">
+        <button class="btn-subtle" id="btnCancelPasteCookies">Cancel</button>
+        <button class="btn btn-primary" id="btnConfirmPasteCookies">Add Account</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Previous Videos Modal (Batch History Dialog) -->
+  <div class="modal-overlay" id="modalPreviousVideos" style="display: none;">
+    <div class="modal-dialog modal-batch-history" style="max-width: 780px; width: 90%; max-height: 520px; display: flex; flex-direction: column;">
+      <div class="modal-header">
+        <div>
+          <h3>Previous videos</h3>
+          <p class="modal-sub" style="margin: 0; font-size: 12px;">Your video history · Batches saved automatically</p>
+        </div>
+        <button class="modal-close" id="btnClosePreviousVideos">×</button>
+      </div>
+
+      <div class="batch-history-body" style="display: flex; gap: 16px; flex: 1; min-height: 320px; overflow: hidden; margin-top: 12px;">
+        <!-- Left: Batches List -->
+        <div class="batch-history-sidebar" style="width: 260px; border-right: 1px solid var(--border-color); padding-right: 12px; display: flex; flex-direction: column;">
+          <h4 style="font-size: 12px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px;">Saved Batches</h4>
+          <div class="batch-history-list" id="batchListContainer" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;">
+            <p class="stat-muted" id="batchEmptyState">No saved batches yet.</p>
+          </div>
+        </div>
+
+        <!-- Right: Batch Details & Videos -->
+        <div class="batch-history-content" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+          <div class="batch-details-header" id="batchDetailsHeader" style="display: none; margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <h4 id="selectedBatchTitle" style="font-size: 14px; font-weight: 600;">Batch Details</h4>
+              <span class="activity-badge badge-ready" id="selectedBatchBadge" style="font-size: 11px;">0 saved</span>
+            </div>
+            <p id="selectedBatchPath" style="font-size: 11px; color: var(--text-muted); word-break: break-all; margin-top: 4px;"></p>
+          </div>
+
+          <!-- Video Items List -->
+          <div class="batch-videos-table" id="batchVideosContainer" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;">
+            <div class="empty-state" style="padding: 40px 0; text-align: center; color: var(--text-muted);">
+              Select a batch on the left to view its videos.
+            </div>
+          </div>
+
+          <!-- Batch Footer Actions -->
+          <div class="batch-history-footer" style="margin-top: 12px; pt: 8px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 11px; color: var(--text-muted);">Double-click a video to open it.</span>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn-subtle" id="btnOpenSelectedBatchFolder" disabled>Open batch folder</button>
+              <button class="btn btn-primary" id="btnCheckAndDownloadBatch" style="font-size: 12px; padding: 6px 14px;">Check & download</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 

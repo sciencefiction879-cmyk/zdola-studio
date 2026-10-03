@@ -1200,3 +1200,103 @@ input:checked + .slider:before {
   color: var(--a);
   text-decoration: underline;
 }
+
+/* Batch History Modal & Items */
+.modal-batch-history {
+  width: 780px !important;
+  max-width: 90vw !important;
+  height: 520px !important;
+  max-height: 85vh !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.batch-item-card {
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.batch-item-card:hover {
+  border-color: var(--a);
+  background: rgba(224, 90, 58, 0.04);
+}
+
+.batch-item-card.active {
+  border-color: var(--a);
+  background: rgba(224, 90, 58, 0.08);
+}
+
+.batch-item-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.batch-item-meta {
+  font-size: 11px;
+  color: var(--mute);
+  margin-top: 4px;
+}
+
+.batch-video-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.batch-video-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--mute);
+}
+
+.batch-video-title {
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 270px;
+}
+
+.batch-video-status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.batch-video-status.completed {
+  background: rgba(76, 175, 80, 0.15);
+  color: #4caf50;
+}
+
+.batch-video-status.rendering {
+  background: rgba(255, 152, 0, 0.15);
+  color: #ff9800;
+}
+
+.batch-video-status.failed {
+  background: rgba(244, 67, 54, 0.15);
+  color: #f44336;
+}
+
+.batch-video-status.submitting {
+  background: rgba(33, 150, 243, 0.15);
+  color: #2196f3;
+}
+
