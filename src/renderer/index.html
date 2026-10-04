@@ -142,6 +142,31 @@
           <p class="panel-subtitle">Configure accounts, skills and queue limits.</p>
         </div>
 
+        <!-- Video Download Settings -->
+        <div class="setting-group">
+          <label>Video Downloads & Output Folder</label>
+          <div class="input-with-btn">
+            <input type="text" id="settingSavePath" placeholder="Choose where videos are saved...">
+            <button class="btn-subtle" id="btnBrowseSavePath">Browse</button>
+            <button class="btn-subtle" id="btnOpenSavePath">Open</button>
+          </div>
+          <p class="help-text">Where your rendered 1080P Seedance 2.5 videos are saved.</p>
+          <div class="setting-checkboxes" style="margin-top: 8px; display: flex; flex-direction: column; gap: 6px;">
+            <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; cursor: pointer;">
+              <input type="checkbox" id="chkAutoOpenFolder" checked>
+              <span>Automatically reveal folder in Finder when batch finishes</span>
+            </label>
+            <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; cursor: pointer;">
+              <input type="checkbox" id="chkOrganizeBatch" checked>
+              <span>Organize videos into Date & Time batch subfolders</span>
+            </label>
+            <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; cursor: pointer;">
+              <input type="checkbox" id="chkUnwatermarked1080p" checked>
+              <span>Enforce 1080P Unwatermarked quality (Seedance 2.5)</span>
+            </label>
+          </div>
+        </div>
+
         <!-- Single cookie file path -->
         <div class="setting-group">
           <label>Single cookie file path</label>
@@ -342,7 +367,18 @@
   </main>
 
   <!-- ZDOLA CREATION VIEW (Matching Competitor Reference Exactly) -->
-  <main class="app-body creation-body" id="creationView" style="display: none;">
+  <main class="app-body creation-body" id="creationView" style="display: none; flex-direction: column;">
+    <!-- Notice Banner (Matching Competitor Reference Frame 015 & 035) -->
+    <div class="creation-notice-banner" style="display: flex; justify-content: space-between; align-items: center; background: rgba(207, 113, 81, 0.12); border: 1px solid rgba(207, 113, 81, 0.25); border-radius: 8px; padding: 12px 18px; margin: 12px 20px 0 20px;">
+      <div style="font-size: 13px; line-height: 1.5; color: var(--text-color, #e6e1e5);">
+        <b>These accounts are not meant to be used by hand.</b><br>
+        <span style="opacity: 0.85;">Get ZDola at zakariyastudio.com to put them to work and make your videos.</span>
+      </div>
+      <button class="btn btn-primary" id="btnNoticeGetZdola" style="background: #cf7151; color: #fff; font-size: 13px; padding: 7px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; border: none;">
+        Get ZDola
+      </button>
+    </div>
+
     <!-- Creation Sub-Header / Nav Tabs -->
     <div class="creation-top-nav">
       <div class="creation-tabs">
@@ -355,12 +391,17 @@
     <!-- TAB 1: CREATE VIEW (Frame 010 & 012) -->
     <div class="c-tab-page" id="pageCreate">
       <!-- Top Action Bar -->
-      <div class="creation-action-bar">
-        <button class="btn btn-primary btn-start-creation" id="btnStartCreation">
-          ▶ Start Account Creation
-        </button>
-        <button class="btn btn-subtle btn-stop-creation" id="btnStopCreation">
-          ⏹ Stop
+      <div class="creation-action-bar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div style="display: flex; gap: 10px;">
+          <button class="btn btn-primary btn-start-creation" id="btnStartCreation">
+            ▶ Start Account Creation
+          </button>
+          <button class="btn btn-subtle btn-stop-creation" id="btnStopCreation">
+            ⏹ Stop
+          </button>
+        </div>
+        <button class="btn btn-subtle" id="btnCloseAllChrome" style="font-size: 13px;">
+          Close all
         </button>
       </div>
 

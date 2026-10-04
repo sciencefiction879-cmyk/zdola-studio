@@ -91,6 +91,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     inputSavePath: document.getElementById('inputSavePath'),
     btnBrowseFolder: document.getElementById('btnBrowseFolder'),
     btnOpenFolder: document.getElementById('btnOpenFolder'),
+    settingSavePath: document.getElementById('settingSavePath'),
+    btnBrowseSavePath: document.getElementById('btnBrowseSavePath'),
+    btnOpenSavePath: document.getElementById('btnOpenSavePath'),
+    chkAutoOpenFolder: document.getElementById('chkAutoOpenFolder'),
+    chkOrganizeBatch: document.getElementById('chkOrganizeBatch'),
+    chkUnwatermarked1080p: document.getElementById('chkUnwatermarked1080p'),
     queueCountText: document.getElementById('queueCountText'),
     btnStopQueue: document.getElementById('btnStopQueue'),
     btnStartGeneration: document.getElementById('btnStartGeneration'),
@@ -559,16 +565,66 @@ document.addEventListener('DOMContentLoaded', async () => {
     const dir = await window.zdolaAPI.browseSaveDirectory();
     if (dir) {
       el.inputSavePath.value = dir;
+      if (el.settingSavePath) el.settingSavePath.value = dir;
       state.savePath = dir;
       addLog(`Save destination set to: ${dir}`, 'info');
     }
   });
 
   el.btnOpenFolder.addEventListener('click', () => {
-    if (window.zdolaAPI && el.inputSavePath.value) {
-      window.zdolaAPI.openFolder(el.inputSavePath.value);
+    if (window.zdolaAPI && (el.inputSavePath.value || state.savePath)) {
+      window.zdolaAPI.openFolder(el.inputSavePath.value || state.savePath);
     }
   });
+
+  // Settings Video Download Controls
+  if (el.btnBrowseSavePath) {
+    el.btnBrowseSavePath.addEventListener('click', async () => {
+      if (!window.zdolaAPI) return;
+      const dir = await window.zdolaAPI.browseSaveDirectory();
+      if (dir) {
+        el.inputSavePath.value = dir;
+        el.settingSavePath.value = dir;
+        state.savePath = dir;
+        addLog(`Video download location set to: ${dir}`, 'info');
+      }
+    });
+  }
+
+  if (el.btnOpenSavePath) {
+    el.btnOpenSavePath.addEventListener('click', () => {
+      if (window.zdolaAPI && (el.inputSavePath.value || state.savePath)) {
+        window.zdolaAPI.openFolder(el.inputSavePath.value || state.savePath);
+      }
+    });
+  }
+
+  if (el.chkAutoOpenFolder) {
+    el.chkAutoOpenFolder.addEventListener('change', () => {
+      if (window.zdolaAPI) {
+        window.zdolaAPI.saveSettings({ openFolderOnComplete: el.chkAutoOpenFolder.checked });
+        addLog(`Auto-open download folder: ${el.chkAutoOpenFolder.checked ? 'Enabled' : 'Disabled'}`, 'info');
+      }
+    });
+  }
+
+  if (el.chkOrganizeBatch) {
+    el.chkOrganizeBatch.addEventListener('change', () => {
+      if (window.zdolaAPI) {
+        window.zdolaAPI.saveSettings({ organizeSubfolders: el.chkOrganizeBatch.checked });
+        addLog(`Organize into batch subfolders: ${el.chkOrganizeBatch.checked ? 'Enabled' : 'Disabled'}`, 'info');
+      }
+    });
+  }
+
+  if (el.chkUnwatermarked1080p) {
+    el.chkUnwatermarked1080p.addEventListener('change', () => {
+      if (window.zdolaAPI) {
+        window.zdolaAPI.saveSettings({ unwatermarked1080p: el.chkUnwatermarked1080p.checked });
+        addLog(`1080P Unwatermarked quality: ${el.chkUnwatermarked1080p.checked ? 'Enforced' : 'Default'}`, 'info');
+      }
+    });
+  }
 
   // Start Generation
   el.btnStartGeneration.addEventListener('click', async () => {
@@ -777,16 +833,38 @@ document.addEventListener('DOMContentLoaded', async () => {
       const sizeStr = job.video_size ? `${(job.video_size / (1024 * 1024)).toFixed(1)} MB` : '';
       const statusLabel = job.status === 'completed' ? 'Saved ✓' : (job.status === 'rendering' ? 'Rendering ⏳' : (job.status === 'failed' ? 'Failed ✕' : 'Pending'));
 
+      const actionButtons = job.video_path ? `
+        <button class="btn-subtle btn-xs btn-play-video" title="Play video" style="padding: 2px 6px; font-size: 11px;">▶ Play</button>
+        <button class="btn-subtle btn-xs btn-show-finder" title="Show in Finder" style="padding: 2px 6px; font-size: 11px;">📂 Finder</button>
+      ` : '';
+
       row.innerHTML = `
-        <div style="display: flex; align-items: center; gap: 8px; overflow: hidden;">
+        <div style="display: flex; align-items: center; gap: 8px; overflow: hidden; flex: 1;">
           <span style="font-size: 11px; color: var(--text-muted); min-width: 20px;">#${job.prompt_idx}</span>
           <span class="batch-video-title" title="${job.video_filename || job.prompt}">${job.video_filename || job.prompt}</span>
         </div>
-        <div style="display: flex; align-items: center; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 11px; color: var(--text-muted);">${sizeStr}</span>
           <span class="batch-video-status ${job.status}">${statusLabel}</span>
+          ${actionButtons}
         </div>
       `;
+
+      const playBtn = row.querySelector('.btn-play-video');
+      if (playBtn) {
+        playBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          window.zdolaAPI?.openVideoFile(job.video_path);
+        });
+      }
+
+      const finderBtn = row.querySelector('.btn-show-finder');
+      if (finderBtn) {
+        finderBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          window.zdolaAPI?.showInFolder(job.video_path);
+        });
+      }
 
       row.addEventListener('dblclick', async () => {
         if (job.video_path && window.zdolaAPI) {
@@ -941,6 +1019,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         state.accounts = init.accounts || [];
         state.savePath = init.savePath || '';
         el.inputSavePath.value = state.savePath;
+        if (el.settingSavePath) el.settingSavePath.value = state.savePath;
+        const s = init.settings || {};
+        if (el.chkAutoOpenFolder) el.chkAutoOpenFolder.checked = s.openFolderOnComplete !== false;
+        if (el.chkOrganizeBatch) el.chkOrganizeBatch.checked = s.organizeSubfolders !== false;
+        if (el.chkUnwatermarked1080p) el.chkUnwatermarked1080p.checked = s.unwatermarked1080p !== false;
         state.allTimeVideosSaved = init.allTimeVideosSaved || 0;
         el.savedAllTime.textContent = `All-time: ${state.allTimeVideosSaved} videos saved`;
         state.accounts.forEach(a => state.selectedAccountIds.add(a.id));
@@ -1144,6 +1227,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     cEl.btnPauseAllThreads?.addEventListener('click', () => window.zdolaAPI.creationPauseAll());
     cEl.btnResumeAllThreads?.addEventListener('click', () => window.zdolaAPI.creationResumeAll());
     cEl.btnClearCreationLog?.addEventListener('click', () => { cEl.creationLogBox.innerHTML = ''; });
+
+    const btnCloseAll = document.getElementById('btnCloseAllChrome');
+    if (btnCloseAll) {
+      btnCloseAll.addEventListener('click', async () => {
+        await window.zdolaAPI.creationCloseAll();
+        creationState.isCreating = false;
+        cEl.btnStartCreation.disabled = false;
+        cEl.btnStartCreation.textContent = '▶ Start Account Creation';
+        cEl.btnStopCreation.disabled = true;
+        cEl.cBottomStatus.textContent = 'Closed all Chrome windows.';
+        addCLog('Closed all Chrome creation windows.', 'info');
+      });
+    }
+
+    const btnNotice = document.getElementById('btnNoticeGetZdola');
+    if (btnNotice) {
+      btnNotice.addEventListener('click', () => {
+        window.zdolaAPI?.openExternal('http://zakariyastudio.com/');
+      });
+    }
 
     // Thread Updates
     window.zdolaAPI.onCreationThreadUpdated((data) => {

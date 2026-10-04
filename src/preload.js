@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('zdolaAPI', {
   checkPreviousVideos: () => ipcRenderer.invoke('check-previous-videos'),
   getBatchHistory: () => ipcRenderer.invoke('get-batch-history'),
   openVideoFile: (filePath) => ipcRenderer.invoke('open-video-file', filePath),
+  showInFolder: (filePath) => ipcRenderer.invoke('show-in-folder', filePath),
   openBatchFolder: (folderPath) => ipcRenderer.invoke('open-batch-folder', folderPath),
 
   // Settings & state
@@ -40,6 +41,7 @@ contextBridge.exposeInMainWorld('zdolaAPI', {
   // ZDola Creation Suite APIs
   creationStart: (payload) => ipcRenderer.invoke('creation-start', payload),
   creationStop: () => ipcRenderer.invoke('creation-stop'),
+  creationCloseAll: () => ipcRenderer.invoke('creation-close-all'),
   creationPauseThread: (threadKey) => ipcRenderer.invoke('creation-pause-thread', threadKey),
   creationResumeThread: (threadKey) => ipcRenderer.invoke('creation-resume-thread', threadKey),
   creationPauseAll: () => ipcRenderer.invoke('creation-pause-all'),

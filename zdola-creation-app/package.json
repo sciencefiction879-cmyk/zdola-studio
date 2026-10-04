@@ -1,0 +1,75 @@
+{
+  "name": "zdola-creation",
+  "productName": "ZDola Creation",
+  "version": "1.0.0",
+  "description": "Multi-threaded Chrome automation for Dola.com accounts, OTP verification, and cookie generation",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "build:mac": "electron-builder --mac dmg",
+    "build:dmg": "electron-builder --mac dmg --publish never"
+  },
+  "keywords": [
+    "zdola",
+    "creation",
+    "dola",
+    "accounts",
+    "cookies"
+  ],
+  "author": "Zakariya Studio",
+  "license": "Commercial",
+  "dependencies": {
+    "puppeteer-core": "^25.12.0"
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.zakariyastudio.zdolacreation",
+    "productName": "ZDola Creation",
+    "copyright": "Copyright © 2026 Zakariya Studio",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        "dmg"
+      ],
+      "icon": "build/icon.icns",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "identity": null
+    },
+    "dmg": {
+      "title": "ZDola Creation",
+      "icon": "build/icon.icns",
+      "contents": [
+        {
+          "x": 140,
+          "y": 240,
+          "type": "file"
+        },
+        {
+          "x": 420,
+          "y": 240,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 560,
+        "height": 400
+      }
+    },
+    "files": [
+      "src/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ]
+  }
+}

@@ -502,10 +502,13 @@ class CreationController {
     fs.writeFileSync(profileNetscapeTxt, netscapeContent, 'utf8');
     fs.writeFileSync(profileJson, jsonContent, 'utf8');
 
-    // 2. Save cookies to user Downloads folder (just like competitor)
-    const downloadsDir = path.join(os.homedir(), 'Downloads');
-    const dlFilename = `www.dola.com_cookies_${tsStr}.txt`;
-    const dlPath = path.join(downloadsDir, dlFilename);
+    // 2. Save cookies to Desktop/cookies folder (matching exact competitor and video)
+    const desktopCookiesDir = path.join(os.homedir(), 'Desktop', 'cookies');
+    if (!fs.existsSync(desktopCookiesDir)) {
+      try { fs.mkdirSync(desktopCookiesDir, { recursive: true }); } catch (_) {}
+    }
+    const dlFilename = `www.dola.com_cookies_${profileFolderName.split('_pending')[0]}.txt`;
+    const dlPath = path.join(desktopCookiesDir, dlFilename);
     try {
       fs.writeFileSync(dlPath, netscapeContent, 'utf8');
     } catch (_) {}
@@ -596,6 +599,17 @@ class CreationController {
       person: thread.person || { first: 'Dola', full: 'Dola User' }
     });
     return res;
+  }
+
+  closeAll() {
+    this.stop();
+    for (const [key, thread] of this.activeThreads) {
+      if (thread && thread.win) {
+        try { thread.win.close(); } catch (_) {}
+      }
+    }
+    this.activeThreads.clear();
+    this.sendLog('Closed all open Chrome creation windows.', 'info');
   }
 }
 

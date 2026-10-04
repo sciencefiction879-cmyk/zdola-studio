@@ -312,44 +312,110 @@ function decryptSeedanceUrl(token, keySeed) {
 }
 
 /**
- * Downloads a video from URL to target file path
+ * Downloads a video from URL to target file path with robust redirect handling,
+ * CDN user-agent headers, and file verification.
  */
-function downloadFile(urlStr, targetPath, onProgress) {
+function downloadFile(urlStr, targetPath, onProgress, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
+    if (maxRedirects <= 0) {
+      return reject(new Error('Too many redirects while downloading video'));
+    }
+
     try {
       const url = new URL(urlStr);
-      const client = url.protocol === 'https:' ? https : http;
+      const isHttps = url.protocol === 'https:';
+      const client = isHttps ? https : http;
 
-      const file = fs.createWriteStream(targetPath);
-      const req = client.get(urlStr, res => {
+      // Ensure destination directory exists
+      const dir = path.dirname(targetPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      const options = {
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname + url.search,
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+          'Accept': 'video/webm,video/ogg,video/*;q=0.9,application/ogg;q=0.7,audio/*;q=0.6,*/*;q=0.5',
+          'Referer': 'https://www.dola.com/',
+          'Accept-Language': 'en-US,en;q=0.9'
+        },
+        timeout: 60000
+      };
+
+      const req = client.request(options, (res) => {
+        // Handle HTTP 3xx Redirects
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          file.close();
-          try { fs.unlinkSync(targetPath); } catch (_) {}
-          return downloadFile(res.headers.location, targetPath, onProgress).then(resolve).catch(reject);
+          const nextUrl = new URL(res.headers.location, urlStr).toString();
+          return downloadFile(nextUrl, targetPath, onProgress, maxRedirects - 1)
+            .then(resolve)
+            .catch(reject);
         }
 
-        const total = parseInt(res.headers['content-length'], 10) || 0;
-        let downloaded = 0;
+        if (res.statusCode !== 200 && res.statusCode !== 206) {
+          return reject(new Error(`Video download failed with HTTP status ${res.statusCode}`));
+        }
 
-        res.on('data', chunk => {
-          downloaded += chunk.length;
-          file.write(chunk);
-          if (onProgress && total > 0) {
-            onProgress(Math.round((downloaded / total) * 100));
+        const totalBytes = parseInt(res.headers['content-length'], 10) || 0;
+        let downloadedBytes = 0;
+        let lastReportedPct = -1;
+
+        const fileStream = fs.createWriteStream(targetPath);
+
+        res.on('data', (chunk) => {
+          downloadedBytes += chunk.length;
+          fileStream.write(chunk);
+          if (onProgress && totalBytes > 0) {
+            const pct = Math.floor((downloadedBytes / totalBytes) * 100);
+            if (pct !== lastReportedPct && pct % 5 === 0) {
+              lastReportedPct = pct;
+              onProgress(pct, downloadedBytes, totalBytes);
+            }
           }
         });
 
         res.on('end', () => {
-          file.end();
-          resolve(targetPath);
+          fileStream.end();
+        });
+
+        fileStream.on('finish', () => {
+          fileStream.close(() => {
+            try {
+              const stats = fs.statSync(targetPath);
+              if (stats.size < 1024) {
+                try { fs.unlinkSync(targetPath); } catch (_) {}
+                return reject(new Error('Downloaded video file is empty or corrupted (<1KB)'));
+              }
+              if (onProgress) onProgress(100, stats.size, stats.size);
+              resolve(targetPath);
+            } catch (err) {
+              reject(err);
+            }
+          });
+        });
+
+        fileStream.on('error', (err) => {
+          fileStream.close();
+          try { if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath); } catch (_) {}
+          reject(err);
         });
       });
 
-      req.on('error', err => {
-        file.close();
+      req.on('timeout', () => {
+        req.destroy();
+        try { if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath); } catch (_) {}
+        reject(new Error('Video download connection timed out'));
+      });
+
+      req.on('error', (err) => {
         try { if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath); } catch (_) {}
         reject(err);
       });
+
+      req.end();
     } catch (e) {
       reject(e);
     }

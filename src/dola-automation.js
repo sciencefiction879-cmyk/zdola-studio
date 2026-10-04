@@ -577,7 +577,34 @@ async function monitorAndDownloadVideo({
 
     if (videoUrl) {
       logFn(`Downloading unwatermarked Seedance 2.5 video to ${path.basename(outputPath)}...`, 'success');
-      await downloadFile(videoUrl, outputPath);
+      let downloadSuccess = false;
+      let lastErr = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          await downloadFile(videoUrl, outputPath, (pct, downloadedBytes, totalBytes) => {
+            const mb = (downloadedBytes / (1024 * 1024)).toFixed(1);
+            const totalMb = totalBytes > 0 ? (totalBytes / (1024 * 1024)).toFixed(1) : '?';
+            if (progressFn) {
+              progressFn({
+                statusText: `Downloading video #${promptIndex}: ${pct}% (${mb}MB / ${totalMb}MB)`
+              });
+            }
+          });
+          downloadSuccess = true;
+          break;
+        } catch (err) {
+          lastErr = err;
+          if (attempt < 3) {
+            logFn(`Download attempt ${attempt} failed: ${err.message}. Retrying in 3s...`, 'warn');
+            await new Promise(r => setTimeout(r, 3000));
+          }
+        }
+      }
+
+      if (!downloadSuccess) {
+        return { ok: false, error: `Failed to download video after 3 attempts: ${lastErr?.message}` };
+      }
+
       return { ok: true, path: outputPath };
     } else {
       return { ok: false, error: 'Video generation timed out or was not found in chat.' };

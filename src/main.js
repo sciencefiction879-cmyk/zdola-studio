@@ -53,6 +53,9 @@ let store = {
     checkAfterMinutes: 5,
     parallelChecks: 5,
     runLiveOnly: true,
+    organizeSubfolders: true,
+    openFolderOnComplete: true,
+    unwatermarked1080p: true,
     allTimeVideosSaved: 0,
     licenseKey: 'ZS-LIFETIME-COMMUNITY-VIP'
   })
@@ -410,7 +413,10 @@ ipcMain.handle('start-generation', async (event, payload) => {
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
   const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}-${pad(now.getMinutes())} - ${prompts.length} videos`;
-  const batchDir = path.join(saveFolder || store.settings.savePath, dateStr);
+  const baseFolder = saveFolder || store.settings.savePath;
+  const batchDir = store.settings.organizeSubfolders !== false
+    ? path.join(baseFolder, dateStr)
+    : baseFolder;
 
   try {
     fs.mkdirSync(batchDir, { recursive: true });
@@ -582,6 +588,9 @@ ipcMain.handle('start-generation', async (event, payload) => {
 
               if (currentGeneration.downloaded >= currentGeneration.total) {
                 mainWindow?.webContents.send('queue-finished');
+                if (store.settings.openFolderOnComplete !== false) {
+                  shell.openPath(batchDir);
+                }
                 currentGeneration = null;
               }
             }
@@ -628,11 +637,22 @@ ipcMain.handle('check-previous-videos', () => {
   return true;
 });
 
-// Initial State
+// Settings & Initial State
+ipcMain.handle('get-settings', () => {
+  return store.settings;
+});
+
+ipcMain.handle('save-settings', (event, newSettings) => {
+  store.settings = { ...store.settings, ...newSettings };
+  saveStore(settingsFile, store.settings);
+  return store.settings;
+});
+
 ipcMain.handle('get-initial-state', () => {
   return {
     accounts: store.accounts,
     savePath: store.settings.savePath,
+    settings: store.settings,
     allTimeVideosSaved: store.settings.allTimeVideosSaved || 0
   };
 });
@@ -656,6 +676,15 @@ ipcMain.handle('get-batch-history', () => {
 ipcMain.handle('open-video-file', (event, filePath) => {
   if (filePath && fs.existsSync(filePath)) {
     shell.openPath(filePath);
+    return true;
+  }
+  return false;
+});
+
+// Show Video File in Finder
+ipcMain.handle('show-in-folder', (event, filePath) => {
+  if (filePath && fs.existsSync(filePath)) {
+    shell.showItemInFolder(filePath);
     return true;
   }
   return false;
@@ -687,6 +716,13 @@ ipcMain.handle('creation-start', async (event, payload) => {
 ipcMain.handle('creation-stop', () => {
   if (creationController) {
     creationController.stopBatch();
+  }
+  return true;
+});
+
+ipcMain.handle('creation-close-all', () => {
+  if (creationController) {
+    creationController.closeAll();
   }
   return true;
 });
