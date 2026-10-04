@@ -25,6 +25,13 @@
       </div>
     </div>
 
+    <div class="header-center">
+      <div class="app-switcher">
+        <button class="app-switch-btn active" id="btnSwitchStudio">ZDola Studio</button>
+        <button class="app-switch-btn" id="btnSwitchCreation">ZDola Creation</button>
+      </div>
+    </div>
+
     <div class="header-right">
       <span class="creator-credit">Created by Zakariya</span>
       <a href="#" class="icon-btn whatsapp-btn" id="btnWhatsApp" title="WhatsApp Support">
@@ -36,7 +43,7 @@
       <a href="#" class="icon-btn support-btn" id="btnSupport" title="Help / Support">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>
       </a>
-      <span class="badge-lifetime">Lifetime</span>
+      <span class="badge-lifetime" id="badgeAppMode">Lifetime</span>
       <div class="theme-toggle">
         <button id="themeLight" class="theme-btn">Light</button>
         <button id="themeDark" class="theme-btn active">Dark</button>
@@ -44,8 +51,8 @@
     </div>
   </header>
 
-  <!-- Main Container -->
-  <main class="app-body">
+  <!-- Main Container: ZDola Studio -->
+  <main class="app-body" id="studioView">
     <!-- Left Column: Accounts / Settings -->
     <aside class="left-panel">
       <!-- Tabs Switcher -->
@@ -332,6 +339,246 @@
         </div>
       </div>
     </section>
+  </main>
+
+  <!-- ZDOLA CREATION VIEW (Matching Competitor Reference Exactly) -->
+  <main class="app-body creation-body" id="creationView" style="display: none;">
+    <!-- Creation Sub-Header / Nav Tabs -->
+    <div class="creation-top-nav">
+      <div class="creation-tabs">
+        <button class="creation-nav-tab active" id="cTabCreate">Create</button>
+        <button class="creation-nav-tab" id="cTabProfiles">Profiles</button>
+        <button class="creation-nav-tab" id="cTabSettings">Settings</button>
+      </div>
+    </div>
+
+    <!-- TAB 1: CREATE VIEW (Frame 010 & 012) -->
+    <div class="c-tab-page" id="pageCreate">
+      <!-- Top Action Bar -->
+      <div class="creation-action-bar">
+        <button class="btn btn-primary btn-start-creation" id="btnStartCreation">
+          ▶ Start Account Creation
+        </button>
+        <button class="btn btn-subtle btn-stop-creation" id="btnStopCreation">
+          ⏹ Stop
+        </button>
+      </div>
+
+      <div class="creation-grid">
+        <!-- Left Column -->
+        <div class="creation-left-col">
+          <!-- Card 1: Accounts to Create -->
+          <div class="c-card">
+            <div class="c-card-header">
+              <span class="c-card-icon">⚡</span>
+              <h3>Accounts to Create</h3>
+            </div>
+            <div class="c-stepper-row">
+              <div class="stepper-controls">
+                <button class="stepper-btn" id="btnAccMinus">-</button>
+                <input type="number" class="stepper-input" id="inputAccountsToCreate" value="2" min="1" max="100">
+                <button class="stepper-btn" id="btnAccPlus">+</button>
+              </div>
+              <div class="quick-pills" id="accQuickPills">
+                <button class="pill" data-val="1">1</button>
+                <button class="pill active" data-val="2">2</button>
+                <button class="pill" data-val="3">3</button>
+                <button class="pill" data-val="5">5</button>
+                <button class="pill" data-val="10">10</button>
+              </div>
+            </div>
+            <p class="c-card-meta" id="lblAccountsReady">Ready to start · 2 accounts selected</p>
+          </div>
+
+          <!-- Card 2: Parallel Chrome Threads -->
+          <div class="c-card">
+            <div class="c-card-header">
+              <span class="c-card-icon">🗂</span>
+              <h3>Parallel Chrome Threads</h3>
+            </div>
+            <div class="c-stepper-row">
+              <span class="stepper-label" style="font-size: 13px;">Threads:</span>
+              <div class="stepper-controls">
+                <button class="stepper-btn" id="btnThreadMinus">-</button>
+                <input type="number" class="stepper-input" id="inputThreadsCount" value="2" min="1" max="20">
+                <button class="stepper-btn" id="btnThreadPlus">+</button>
+              </div>
+              <div class="quick-pills" id="threadQuickPills">
+                <button class="pill" data-val="1">1</button>
+                <button class="pill active" data-val="2">2</button>
+                <button class="pill" data-val="3">3</button>
+                <button class="pill" data-val="5">5</button>
+                <button class="pill" data-val="10">10</button>
+                <button class="pill" data-val="20">20</button>
+              </div>
+            </div>
+            <div class="c-sys-stats" id="cSysStats">
+              CPU: <span id="cStatCpu">28%</span> | RAM: <span id="cStatRam">58%</span> (<span id="cStatRamUsed">18400MB</span> / <span id="cStatRamTotal">32768MB</span>) | Threads Active: <span id="cStatThreadsActive">0/2</span>
+            </div>
+            <p class="c-card-meta" id="lblThreadMode">Mode: 2 Chrome browsers parallel | ~700MB RAM estimated | Available: <span id="cStatRamAvail">14368MB</span></p>
+          </div>
+
+          <!-- Card 3: Thread Status Monitor -->
+          <div class="c-card thread-monitor-card">
+            <div class="c-card-header monitor-header">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="c-card-icon">🗔</span>
+                <h3>Thread Status Monitor</h3>
+              </div>
+              <div class="monitor-actions">
+                <button class="btn-subtle btn-xs" id="btnPauseAllThreads">⏸ Pause All</button>
+                <button class="btn-subtle btn-xs" id="btnResumeAllThreads">▶ Resume All</button>
+              </div>
+            </div>
+            <div class="thread-list" id="threadListContainer">
+              <div class="thread-empty">No active creation threads. Click "Start Account Creation" above.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Column: Live Activity Log -->
+        <div class="creation-right-col">
+          <div class="c-card log-card">
+            <div class="c-card-header log-header">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="c-card-icon">📄</span>
+                <h3>Live Activity Log</h3>
+              </div>
+              <button class="btn-subtle btn-xs" id="btnClearCreationLog">Clear</button>
+            </div>
+            <div class="c-log-box" id="creationLogBox">
+              <div class="c-log-line info">ZDola Creation initialized. Ready.</div>
+              <div class="c-log-line info">Real Chrome Profiles · TempMail.io · Google Cloud Signup · Dola.com OAuth</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Creation Status Bar -->
+      <div class="creation-status-bar">
+        <span id="cBottomStatus">Ready</span>
+        <span id="cBottomStep">Step: --</span>
+      </div>
+    </div>
+
+    <!-- TAB 2: PROFILES VIEW -->
+    <div class="c-tab-page" id="pageProfiles" style="display: none;">
+      <div class="profiles-header-row">
+        <div>
+          <h3>All Saved Chrome Profiles & Dola Accounts</h3>
+          <p class="panel-subtitle">Manage real Chrome profiles, re-extract cookies, or launch in Chrome.</p>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn-subtle" id="btnRefreshProfiles">Refresh</button>
+          <button class="btn btn-primary" id="btnExportAllToStudio">Import All to Studio</button>
+        </div>
+      </div>
+      <div class="profiles-grid" id="profilesGridContainer">
+        <div class="empty-state" style="padding: 40px 0; text-align: center; color: var(--text-muted); width: 100%;">
+          No profiles created yet. Use the "Create" tab to generate accounts automatically.
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: SETTINGS VIEW (Frame 007) -->
+    <div class="c-tab-page" id="pageCreationSettings" style="display: none;">
+      <div class="creation-settings-wrap">
+        <!-- Chrome & Storage Path -->
+        <div class="c-card">
+          <div class="c-card-header">
+            <span class="c-card-icon">⚙</span>
+            <h3>Chrome & Storage Path</h3>
+          </div>
+          <div class="setting-group" style="margin-top: 10px;">
+            <label>Chrome Profiles Save Directory (D:, E:, F:, C: etc. / Documents on Mac):</label>
+            <div class="input-with-btn">
+              <input type="text" id="cSettingProfilesDir" readonly>
+              <button class="btn-subtle" id="btnBrowseProfilesDir">Browse</button>
+            </div>
+            <div class="quick-drives-row" id="quickDrivesRow">
+              <span style="font-size: 11px; color: var(--text-muted);">Quick Shortcuts:</span>
+              <button class="drive-btn" data-shortcut="Documents">Documents</button>
+              <button class="drive-btn" data-shortcut="Movies">Movies</button>
+              <button class="drive-btn" data-shortcut="Downloads">Downloads</button>
+            </div>
+          </div>
+
+          <div class="setting-group">
+            <label>Chrome Executable (chrome.exe / Google Chrome.app):</label>
+            <div class="input-with-btn">
+              <input type="text" id="cSettingChromeExe" placeholder="Locate Google Chrome executable...">
+              <button class="btn-subtle" id="btnLocateChromeExe">Locate</button>
+            </div>
+          </div>
+
+          <div class="setting-group">
+            <div class="radio-group" style="display: flex; gap: 16px;">
+              <label class="radio-label">
+                <input type="radio" name="cBrowserChoice" value="chrome" checked>
+                <span>Google Chrome (Real)</span>
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="cBrowserChoice" value="edge">
+                <span>Microsoft Edge</span>
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="cBrowserChoice" value="electron">
+                <span>Internal Automation Browser</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Options -->
+        <div class="c-card">
+          <div class="c-card-header">
+            <span class="c-card-icon">⚙</span>
+            <h3>Options</h3>
+          </div>
+          <div style="display: flex; gap: 24px; align-items: center; margin-top: 10px;">
+            <div>
+              <label style="font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px;">OTP Timeout (sec):</label>
+              <input type="number" id="cSettingOtpTimeout" value="120" style="width: 90px; padding: 6px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-input); color: var(--text-primary);">
+            </div>
+            <div>
+              <label style="font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px;">Resume Delay (sec):</label>
+              <input type="number" id="cSettingResumeDelay" value="20" style="width: 90px; padding: 6px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-input); color: var(--text-primary);">
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-top: 16px;">
+              <label class="switch">
+                <input type="checkbox" id="cSettingIncognito">
+                <span class="slider"></span>
+              </label>
+              <span style="font-size: 12px;">Incognito</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Email Provider & Verification -->
+        <div class="c-card">
+          <div class="c-card-header">
+            <span class="c-card-icon">✉</span>
+            <h3>Email Provider & Verification</h3>
+          </div>
+          <div class="setting-group" style="margin-top: 10px;">
+            <select id="cSettingEmailProvider" class="select-field" style="width: 100%;">
+              <option value="tempmail_io" selected>tempmail_io (TempMail.io API · Automatic Instant Inbox)</option>
+              <option value="firefox_relay">Firefox Relay (API Token + Forwarding)</option>
+              <option value="guerrillamail">GuerrillaMail (Free Disposable Inbox)</option>
+            </select>
+          </div>
+          <div class="setting-group">
+            <label>Firefox Relay API Token:</label>
+            <input type="text" id="cSettingRelayToken" class="modal-input" placeholder="e.g. 75c26429-7314-42a0-8160-611990cce70f">
+          </div>
+          <div class="setting-group">
+            <label>Gmail Address (receives forwarded OTP):</label>
+            <input type="email" id="cSettingGmailForward" class="modal-input" placeholder="e.g. your_email@gmail.com">
+          </div>
+          <button class="btn btn-primary" id="btnSaveCreationSettings" style="margin-top: 8px;">Save Settings</button>
+        </div>
+      </div>
+    </div>
   </main>
 
   <!-- Key Activation Modal -->

@@ -15,9 +15,11 @@ const {
   monitorAndDownloadVideo,
   createAccountBrowser
 } = require('./dola-automation');
+const { CreationController } = require('./dola-creation');
 
 let mainWindow = null;
 let currentGeneration = null;
+let creationController = null;
 
 // User Data Store paths
 const userDataPath = app.getPath('userData');
@@ -125,6 +127,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  creationController = new CreationController(userDataPath, sendCreationLog, sendCreationThread);
   createWindow();
 
   app.on('activate', () => {
@@ -139,6 +142,14 @@ app.on('window-all-closed', () => {
 // Helper logger to UI
 function sendLog(message, type = 'info') {
   mainWindow?.webContents.send('log', { message, type });
+}
+
+function sendCreationLog(message, type = 'info') {
+  mainWindow?.webContents.send('creation-log', { message, type });
+}
+
+function sendCreationThread(data) {
+  mainWindow?.webContents.send('creation-thread-updated', data);
 }
 
 // --- IPC HANDLERS ---
@@ -164,19 +175,29 @@ ipcMain.handle('select-cookie-files', async () => {
     const cookies = parseCookieFile(fPath);
     const filename = path.basename(fPath);
 
+    const domains = [...new Set(cookies.map(c => c.domain).filter(Boolean))];
+    const hasDola = cookies.some(c => c.domain && c.domain.includes('dola.com'));
+    const isGoogle = domains.some(d => d.includes('google.com')) && !hasDola;
+
     const account = {
       id: 'acc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
       name: `Cookie ${baseCount + i + 1}`,
       filename,
       filePath: fPath,
       cookies,
-      status: 'ready',
-      statusText: 'Ready',
-      hasSkill: true,
+      status: isGoogle ? 'dead' : 'ready',
+      statusText: isGoogle ? 'Google (Not Dola)' : 'Ready',
+      hasSkill: !isGoogle,
       videoCount: 0,
       lastUsed: 0,
       usedRecently: false
     };
+
+    if (isGoogle) {
+      sendLog(`⚠️ ${filename}: This file contains Google cookies, not Dola cookies. Please export from www.dola.com while logged in.`, 'error');
+    } else {
+      sendLog(`Added ${filename} (${account.name}). Verified Dola domain.`, 'info');
+    }
 
     store.accounts.push(account);
     addedAccounts.push(account);
@@ -283,10 +304,10 @@ ipcMain.handle('clear-account-tasks', async (event, accountId) => {
   if (acc) {
     sendLog(`Clearing active queued tasks for ${acc.name} on Dola...`, 'info');
     const res = await clearAccountTasks(acc.cookies);
-    if (res.success) {
-      sendLog(`Successfully cleared ${res.count} tasks on Dola account.`, 'success');
+    if (res.success && res.count > 0) {
+      sendLog(`Successfully cleared ${res.count} scheduled task slot(s) on Dola.`, 'success');
     } else {
-      sendLog(`Cleared tasks on ${acc.name}.`, 'info');
+      sendLog(`No scheduled tasks found to clear on ${acc.name}. Account is clean.`, 'info');
     }
   }
   return true;
@@ -654,4 +675,157 @@ ipcMain.handle('open-external', (event, url) => {
   shell.openExternal(url);
   return true;
 });
+
+// --- ZDOLA CREATION IPC HANDLERS ---
+ipcMain.handle('creation-start', async (event, payload) => {
+  if (creationController) {
+    creationController.startBatch(payload);
+  }
+  return true;
+});
+
+ipcMain.handle('creation-stop', () => {
+  if (creationController) {
+    creationController.stopBatch();
+  }
+  return true;
+});
+
+ipcMain.handle('creation-pause-thread', (event, threadKey) => {
+  creationController?.pauseThread(threadKey);
+  return true;
+});
+
+ipcMain.handle('creation-resume-thread', (event, threadKey) => {
+  creationController?.resumeThread(threadKey);
+  return true;
+});
+
+ipcMain.handle('creation-pause-all', () => {
+  creationController?.pauseAll();
+  return true;
+});
+
+ipcMain.handle('creation-resume-all', () => {
+  creationController?.resumeAll();
+  return true;
+});
+
+ipcMain.handle('creation-get-cookies', async (event, threadKey) => {
+  if (!creationController) return { ok: false, error: 'Creation controller not ready' };
+  try {
+    const res = await creationController.extractCookiesForThread(threadKey);
+    if (res && res.record) {
+      const cookies = parseCookieFile(res.record.cookiePath);
+      const acc = {
+        id: 'acc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+        name: res.record.name || 'Creation Account',
+        filename: path.basename(res.record.cookiePath),
+        filePath: res.record.cookiePath,
+        cookies,
+        status: 'live',
+        statusText: 'Live ✓',
+        hasSkill: true,
+        videoCount: 0,
+        lastUsed: 0,
+        usedRecently: false
+      };
+      store.accounts.push(acc);
+      saveStore(accountsFile, store.accounts);
+      mainWindow?.webContents.send('account-updated', acc);
+      sendLog(`Added ${acc.name} (${acc.filename}) directly into ZDola Studio accounts!`, 'success');
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('creation-get-state', () => {
+  if (!creationController) return { settings: {}, profiles: [], stats: {} };
+  return {
+    settings: creationController.settings,
+    profiles: creationController.profiles,
+    stats: creationController.getSystemStats()
+  };
+});
+
+ipcMain.handle('creation-save-settings', (event, settings) => {
+  creationController?.saveSettings(settings);
+  return true;
+});
+
+ipcMain.handle('creation-browse-profiles-dir', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Chrome Profiles Directory',
+    properties: ['openDirectory', 'createDirectory']
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  const chosen = result.filePaths[0];
+  creationController?.saveSettings({ profilesDir: chosen });
+  return chosen;
+});
+
+ipcMain.handle('creation-locate-chrome', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Locate Google Chrome Executable',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Executable', extensions: process.platform === 'win32' ? ['exe'] : ['*'] }
+    ]
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  const chosen = result.filePaths[0];
+  creationController?.saveSettings({ chromeExecutable: chosen });
+  return chosen;
+});
+
+ipcMain.handle('creation-open-profile-browser', async (event, profileId) => {
+  const profile = creationController?.profiles.find(p => p.id === profileId);
+  if (!profile) return false;
+  const partition = `persist:profile_${profile.folderName}`;
+  const win = new BrowserWindow({
+    width: 880,
+    height: 680,
+    title: `ZDola Creation - ${profile.folderName}`,
+    webPreferences: { partition, contextIsolation: false, nodeIntegration: false }
+  });
+  win.loadURL('https://www.dola.com/chat');
+  return true;
+});
+
+ipcMain.handle('creation-sync-to-studio', (event, profileId) => {
+  const profile = creationController?.profiles.find(p => p.id === profileId);
+  if (!profile || !profile.cookiePath || !fs.existsSync(profile.cookiePath)) {
+    return { ok: false, error: 'Cookie file not found for this profile' };
+  }
+  const cookies = parseCookieFile(profile.cookiePath);
+  const acc = {
+    id: 'acc_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+    name: profile.name || `Profile ${store.accounts.length + 1}`,
+    filename: path.basename(profile.cookiePath),
+    filePath: profile.cookiePath,
+    cookies,
+    status: 'live',
+    statusText: 'Live ✓',
+    hasSkill: true,
+    videoCount: 0,
+    lastUsed: 0,
+    usedRecently: false
+  };
+  store.accounts.push(acc);
+  saveStore(accountsFile, store.accounts);
+  mainWindow?.webContents.send('account-updated', acc);
+  sendLog(`Imported ${acc.name} from ZDola Creation into Studio accounts!`, 'success');
+  return { ok: true, account: acc };
+});
+
+ipcMain.handle('creation-delete-profile', (event, profileId) => {
+  if (creationController) {
+    creationController.profiles = creationController.profiles.filter(p => p.id !== profileId);
+    creationController.saveProfiles();
+  }
+  return true;
+});
+
 

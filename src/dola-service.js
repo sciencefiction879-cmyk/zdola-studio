@@ -159,29 +159,59 @@ async function checkDolaAccount(cookies) {
     return { live: false, reason: 'Empty cookie file' };
   }
 
-  // Check user skills
+  // 1. Domain Validation: Check if cookies belong to dola.com
+  const domains = [...new Set(cookies.map(c => c.domain).filter(Boolean))];
+  const hasDolaDomain = cookies.some(c => c.domain && c.domain.includes('dola.com'));
+  const hasDolaSession = cookies.some(c => ['sessionid', 'passport_csrf_token', 'sid_guard', 'uid_tt', 'sid_tt'].includes(c.name));
+
+  if (!hasDolaDomain && !hasDolaSession) {
+    const invalidDomainStr = domains.join(', ') || 'external domain';
+    return {
+      live: false,
+      reason: `Cookies belong to ${invalidDomainStr}, not dola.com. Please export cookies from www.dola.com while logged in.`
+    };
+  }
+
+  // 2. Direct Auth Check: /alice/conversation/list returns code: 0 if authenticated
+  const convRes = await makeDolaRequest('/alice/conversation/list', cookies, { size: 5 });
+  if (convRes.statusCode === 200 && convRes.data) {
+    if (convRes.data.code === 0) {
+      return {
+        live: true,
+        hasSkill: true,
+        skillName: 'dola-seedance-2-5-30s',
+        username: 'Authenticated Dola Account'
+      };
+    } else if (convRes.data.msg || convRes.data.message) {
+      return {
+        live: false,
+        reason: convRes.data.msg || convRes.data.message || 'Session expired. Log in again.'
+      };
+    }
+  }
+
+  // 3. Fallback skills check
   const res = await makeDolaRequest('/alice/office/skills/manage/list_by_user', cookies, {
     size: 50,
     page: 1
   });
 
-  if (res.statusCode === 200) {
-    let hasSkill = true; // Seedance 2.5 skill is activated by default or registered
+  if (res.statusCode === 200 && res.data && (res.data.code === 0 || res.data.status_code === 0)) {
     return {
       live: true,
-      hasSkill,
+      hasSkill: true,
       skillName: 'dola-seedance-2-5-30s',
       username: 'Authenticated Dola Account'
     };
   }
 
-  // Fallback check
+  // 4. Fallback cron check
   const cronRes = await makeDolaRequest('/alice/job_cron/list', cookies, {
     size: 20,
     sort_order: 1
   });
 
-  if (cronRes.statusCode === 200) {
+  if (cronRes.statusCode === 200 && cronRes.data && (cronRes.data.code === 0 || cronRes.data.status_code === 0)) {
     return {
       live: true,
       hasSkill: true,
@@ -192,7 +222,7 @@ async function checkDolaAccount(cookies) {
 
   return {
     live: false,
-    reason: 'Cookies expired or account not authenticated'
+    reason: (convRes.data?.msg || convRes.data?.message || 'Cookies expired or account not authenticated')
   };
 }
 
@@ -206,14 +236,19 @@ async function clearAccountTasks(cookies) {
       sort_order: 1
     });
 
-    if (listRes.data && listRes.data.list) {
-      const tasks = listRes.data.list;
+    const tasks = listRes.data?.data?.jobs || listRes.data?.jobs || listRes.data?.list || [];
+    let count = 0;
+    if (Array.isArray(tasks) && tasks.length > 0) {
       for (const t of tasks) {
-        if (t.job_id) {
-          await makeDolaRequest('/alice/job_cron/delete', cookies, { job_id: t.job_id });
+        const jobId = t.job_id || t.id;
+        if (jobId) {
+          const delRes = await makeDolaRequest('/alice/job_cron/delete', cookies, { job_id: jobId });
+          if (delRes.data?.code === 0 || delRes.statusCode === 200) {
+            count++;
+          }
         }
       }
-      return { success: true, count: tasks.length };
+      return { success: true, count };
     }
     return { success: true, count: 0 };
   } catch (err) {

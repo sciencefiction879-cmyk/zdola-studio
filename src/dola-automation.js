@@ -320,11 +320,58 @@ async function dispatchDolaPrompt({ account, promptIndex, promptText, logFn }) {
 
     const queryStr = getAliceQuery() ? `?${getAliceQuery()}` : '';
 
+    // 0. Proactively free stale task slots so we never hit "max task count reached"
+    try {
+      const listResp = await win.webContents.executeJavaScript(`(${DOLA_API_REQUEST_JS})({
+        url: '/alice/job_cron/list${queryStr}',
+        body: { size: 50, sort_order: 1 }
+      })`);
+      const existingJobs = listResp?.data?.data?.jobs || listResp?.data?.jobs || [];
+      if (Array.isArray(existingJobs) && existingJobs.length >= 2) {
+        logFn(`Freeing ${existingJobs.length} task slot(s) on ${account.name}...`, 'info');
+        for (const j of existingJobs) {
+          const jId = j.job_id || j.id;
+          if (jId) {
+            await win.webContents.executeJavaScript(`(${DOLA_API_REQUEST_JS})({
+              url: '/alice/job_cron/delete${queryStr}',
+              body: { job_id: "${jId}" }
+            })`);
+          }
+        }
+      }
+    } catch (_) {}
+
     // 1. Create job
-    const createResp = await win.webContents.executeJavaScript(`(${DOLA_API_REQUEST_JS})({
+    let createResp = await win.webContents.executeJavaScript(`(${DOLA_API_REQUEST_JS})({
       url: '/alice/job_cron/create${queryStr}',
       body: ${JSON.stringify(createPayload)}
     })`);
+
+    // If create returns "max task count reached", automatically purge all jobs and retry once!
+    if (createResp?.data?.code === 671010006 || /max task count reached/i.test(createResp?.data?.message || '')) {
+      logFn(`Task limit reached on Dola. Purging scheduled task slots on ${account.name} and retrying...`, 'warn');
+      try {
+        const listResp = await win.webContents.executeJavaScript(`(${DOLA_API_REQUEST_JS})({
+          url: '/alice/job_cron/list${queryStr}',
+          body: { size: 50, sort_order: 1 }
+        })`);
+        const jobs = listResp?.data?.data?.jobs || listResp?.data?.jobs || [];
+        for (const j of jobs) {
+          const jId = j.job_id || j.id;
+          if (jId) {
+            await win.webContents.executeJavaScript(`(${DOLA_API_REQUEST_JS})({
+              url: '/alice/job_cron/delete${queryStr}',
+              body: { job_id: "${jId}" }
+            })`);
+          }
+        }
+        await new Promise(r => setTimeout(r, 1200));
+        createResp = await win.webContents.executeJavaScript(`(${DOLA_API_REQUEST_JS})({
+          url: '/alice/job_cron/create${queryStr}',
+          body: ${JSON.stringify(createPayload)}
+        })`);
+      } catch (_) {}
+    }
 
     let jobId = createResp?.data?.data?.job?.job_id || createResp?.data?.job?.job_id || createResp?.data?.job_id;
 

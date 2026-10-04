@@ -951,6 +951,407 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  // ==========================================================================
+  // ZDOLA CREATION VIEW LOGIC (Competitor Reference Suite)
+  // ==========================================================================
+  function initCreationView() {
+    const cEl = {
+      btnSwitchStudio: document.getElementById('btnSwitchStudio'),
+      btnSwitchCreation: document.getElementById('btnSwitchCreation'),
+      studioView: document.getElementById('studioView'),
+      creationView: document.getElementById('creationView'),
+      badgeAppMode: document.getElementById('badgeAppMode'),
+
+      // Tabs
+      cTabCreate: document.getElementById('cTabCreate'),
+      cTabProfiles: document.getElementById('cTabProfiles'),
+      cTabSettings: document.getElementById('cTabSettings'),
+      pageCreate: document.getElementById('pageCreate'),
+      pageProfiles: document.getElementById('pageProfiles'),
+      pageCreationSettings: document.getElementById('pageCreationSettings'),
+
+      // Create Actions
+      btnStartCreation: document.getElementById('btnStartCreation'),
+      btnStopCreation: document.getElementById('btnStopCreation'),
+      btnAccMinus: document.getElementById('btnAccMinus'),
+      btnAccPlus: document.getElementById('btnAccPlus'),
+      inputAccountsToCreate: document.getElementById('inputAccountsToCreate'),
+      accQuickPills: document.querySelectorAll('#accQuickPills .pill'),
+      lblAccountsReady: document.getElementById('lblAccountsReady'),
+
+      btnThreadMinus: document.getElementById('btnThreadMinus'),
+      btnThreadPlus: document.getElementById('btnThreadPlus'),
+      inputThreadsCount: document.getElementById('inputThreadsCount'),
+      threadQuickPills: document.querySelectorAll('#threadQuickPills .pill'),
+      lblThreadMode: document.getElementById('lblThreadMode'),
+
+      // Stats
+      cStatCpu: document.getElementById('cStatCpu'),
+      cStatRam: document.getElementById('cStatRam'),
+      cStatRamUsed: document.getElementById('cStatRamUsed'),
+      cStatRamTotal: document.getElementById('cStatRamTotal'),
+      cStatThreadsActive: document.getElementById('cStatThreadsActive'),
+      cStatRamAvail: document.getElementById('cStatRamAvail'),
+
+      // Monitor
+      btnPauseAllThreads: document.getElementById('btnPauseAllThreads'),
+      btnResumeAllThreads: document.getElementById('btnResumeAllThreads'),
+      threadListContainer: document.getElementById('threadListContainer'),
+
+      // Log
+      btnClearCreationLog: document.getElementById('btnClearCreationLog'),
+      creationLogBox: document.getElementById('creationLogBox'),
+      cBottomStatus: document.getElementById('cBottomStatus'),
+      cBottomStep: document.getElementById('cBottomStep'),
+
+      // Profiles
+      btnRefreshProfiles: document.getElementById('btnRefreshProfiles'),
+      btnExportAllToStudio: document.getElementById('btnExportAllToStudio'),
+      profilesGridContainer: document.getElementById('profilesGridContainer'),
+
+      // Settings
+      cSettingProfilesDir: document.getElementById('cSettingProfilesDir'),
+      btnBrowseProfilesDir: document.getElementById('btnBrowseProfilesDir'),
+      cSettingChromeExe: document.getElementById('cSettingChromeExe'),
+      btnLocateChromeExe: document.getElementById('btnLocateChromeExe'),
+      cBrowserRadios: document.querySelectorAll('input[name="cBrowserChoice"]'),
+      cSettingOtpTimeout: document.getElementById('cSettingOtpTimeout'),
+      cSettingResumeDelay: document.getElementById('cSettingResumeDelay'),
+      cSettingIncognito: document.getElementById('cSettingIncognito'),
+      cSettingEmailProvider: document.getElementById('cSettingEmailProvider'),
+      cSettingRelayToken: document.getElementById('cSettingRelayToken'),
+      cSettingGmailForward: document.getElementById('cSettingGmailForward'),
+      btnSaveCreationSettings: document.getElementById('btnSaveCreationSettings'),
+      driveBtns: document.querySelectorAll('.drive-btn')
+    };
+
+    let creationState = {
+      accountsToCreate: 2,
+      parallelThreads: 2,
+      isCreating: false,
+      threads: new Map(),
+      profiles: [],
+      settings: {}
+    };
+
+    function addCLog(msg, type = 'info') {
+      const now = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      const timeStr = `[${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}]`;
+      const div = document.createElement('div');
+      div.className = `c-log-line ${type}`;
+      div.textContent = `${timeStr} ${msg}`;
+      cEl.creationLogBox.appendChild(div);
+      cEl.creationLogBox.scrollTop = cEl.creationLogBox.scrollHeight;
+    }
+
+    // Switch between Studio & Creation
+    function switchMode(mode) {
+      if (mode === 'creation') {
+        cEl.btnSwitchStudio?.classList.remove('active');
+        cEl.btnSwitchCreation?.classList.add('active');
+        if (cEl.studioView) cEl.studioView.style.display = 'none';
+        if (cEl.creationView) cEl.creationView.style.display = 'flex';
+        loadCreationState();
+      } else {
+        cEl.btnSwitchCreation?.classList.remove('active');
+        cEl.btnSwitchStudio?.classList.add('active');
+        if (cEl.creationView) cEl.creationView.style.display = 'none';
+        if (cEl.studioView) cEl.studioView.style.display = 'grid';
+        if (cEl.badgeAppMode) cEl.badgeAppMode.textContent = 'Lifetime';
+      }
+    }
+
+    cEl.btnSwitchStudio?.addEventListener('click', () => switchMode('studio'));
+    cEl.btnSwitchCreation?.addEventListener('click', () => switchMode('creation'));
+
+    // Sub-Tabs
+    function switchCreationTab(tab) {
+      cEl.cTabCreate?.classList.toggle('active', tab === 'create');
+      cEl.cTabProfiles?.classList.toggle('active', tab === 'profiles');
+      cEl.cTabSettings?.classList.toggle('active', tab === 'settings');
+
+      if (cEl.pageCreate) cEl.pageCreate.style.display = tab === 'create' ? 'flex' : 'none';
+      if (cEl.pageProfiles) cEl.pageProfiles.style.display = tab === 'profiles' ? 'flex' : 'none';
+      if (cEl.pageCreationSettings) cEl.pageCreationSettings.style.display = tab === 'settings' ? 'flex' : 'none';
+
+      if (tab === 'profiles') renderProfilesGrid();
+    }
+
+    cEl.cTabCreate?.addEventListener('click', () => switchCreationTab('create'));
+    cEl.cTabProfiles?.addEventListener('click', () => switchCreationTab('profiles'));
+    cEl.cTabSettings?.addEventListener('click', () => switchCreationTab('settings'));
+
+    // Steppers & Pills
+    function updateAccountsCount(count) {
+      creationState.accountsToCreate = Math.max(1, count);
+      if (cEl.inputAccountsToCreate) cEl.inputAccountsToCreate.value = creationState.accountsToCreate;
+      if (cEl.lblAccountsReady) cEl.lblAccountsReady.textContent = `Ready to start · ${creationState.accountsToCreate} accounts selected`;
+      cEl.accQuickPills.forEach(p => p.classList.toggle('active', Number(p.dataset.val) === creationState.accountsToCreate));
+    }
+
+    cEl.btnAccMinus?.addEventListener('click', () => updateAccountsCount(creationState.accountsToCreate - 1));
+    cEl.btnAccPlus?.addEventListener('click', () => updateAccountsCount(creationState.accountsToCreate + 1));
+    cEl.inputAccountsToCreate?.addEventListener('change', (e) => updateAccountsCount(parseInt(e.target.value, 10) || 1));
+    cEl.accQuickPills.forEach(p => {
+      p.addEventListener('click', () => updateAccountsCount(Number(p.dataset.val)));
+    });
+
+    function updateThreadsCount(count) {
+      creationState.parallelThreads = Math.max(1, count);
+      if (cEl.inputThreadsCount) cEl.inputThreadsCount.value = creationState.parallelThreads;
+      if (cEl.lblThreadMode) cEl.lblThreadMode.textContent = `Mode: ${creationState.parallelThreads} Chrome browsers parallel | ~${creationState.parallelThreads * 350}MB RAM estimated`;
+      cEl.threadQuickPills.forEach(p => p.classList.toggle('active', Number(p.dataset.val) === creationState.parallelThreads));
+    }
+
+    cEl.btnThreadMinus?.addEventListener('click', () => updateThreadsCount(creationState.parallelThreads - 1));
+    cEl.btnThreadPlus?.addEventListener('click', () => updateThreadsCount(creationState.parallelThreads + 1));
+    cEl.inputThreadsCount?.addEventListener('change', (e) => updateThreadsCount(parseInt(e.target.value, 10) || 1));
+    cEl.threadQuickPills.forEach(p => {
+      p.addEventListener('click', () => updateThreadsCount(Number(p.dataset.val)));
+    });
+
+    // Start / Stop Creation
+    cEl.btnStartCreation?.addEventListener('click', async () => {
+      if (creationState.isCreating) return;
+      creationState.isCreating = true;
+      cEl.btnStartCreation.disabled = true;
+      cEl.btnStartCreation.textContent = '⏳ Creating Accounts...';
+      cEl.btnStopCreation.disabled = false;
+      cEl.cBottomStatus.textContent = 'Running account creation batch...';
+
+      cEl.threadListContainer.innerHTML = '';
+
+      try {
+        await window.zdolaAPI.creationStart({
+          totalAccounts: creationState.accountsToCreate,
+          parallelThreads: creationState.parallelThreads
+        });
+      } catch (err) {
+        addCLog(`Error starting batch: ${err.message}`, 'error');
+      }
+    });
+
+    cEl.btnStopCreation?.addEventListener('click', async () => {
+      await window.zdolaAPI.creationStop();
+      creationState.isCreating = false;
+      cEl.btnStartCreation.disabled = false;
+      cEl.btnStartCreation.textContent = '▶ Start Account Creation';
+      cEl.btnStopCreation.disabled = true;
+      cEl.cBottomStatus.textContent = 'Stopped.';
+    });
+
+    cEl.btnPauseAllThreads?.addEventListener('click', () => window.zdolaAPI.creationPauseAll());
+    cEl.btnResumeAllThreads?.addEventListener('click', () => window.zdolaAPI.creationResumeAll());
+    cEl.btnClearCreationLog?.addEventListener('click', () => { cEl.creationLogBox.innerHTML = ''; });
+
+    // Thread Updates
+    window.zdolaAPI.onCreationThreadUpdated((data) => {
+      const { threadKey } = data;
+      creationState.threads.set(threadKey, data);
+      renderThreadItem(threadKey, data);
+    });
+
+    function renderThreadItem(threadKey, data) {
+      let item = document.getElementById(`thread_${threadKey}`);
+      if (!item) {
+        const empty = cEl.threadListContainer.querySelector('.thread-empty');
+        if (empty) empty.remove();
+
+        item = document.createElement('div');
+        item.id = `thread_${threadKey}`;
+        item.className = 'thread-item';
+        cEl.threadListContainer.appendChild(item);
+      }
+
+      const isSuccess = data.badge === 'success';
+      const isPaused = data.badge === 'paused';
+      const statusIcon = isSuccess ? '✅' : (isPaused ? '⏸' : '🟠');
+
+      item.innerHTML = `
+        <div class="thread-item-left">
+          <span class="thread-tag">${threadKey}</span>
+          <span class="thread-desc">${statusIcon} ${data.statusText || 'Working...'}</span>
+        </div>
+        <div class="thread-item-right" style="display: flex; gap: 6px;">
+          ${data.canGetCookies ? `
+            <button class="btn-get-cookies" data-thread="${threadKey}">🍪 Get Cookies</button>
+          ` : `
+            <button class="btn-subtle btn-xs btn-pause-thread" data-thread="${threadKey}">${isPaused ? '▶ Resume' : '⏸ Pause'}</button>
+          `}
+        </div>
+      `;
+
+      const btnCookies = item.querySelector('.btn-get-cookies');
+      if (btnCookies) {
+        btnCookies.addEventListener('click', async () => {
+          btnCookies.textContent = 'Extracting...';
+          const res = await window.zdolaAPI.creationGetCookies(threadKey);
+          btnCookies.textContent = res.ok ? '✓ Cookies Saved' : 'Failed';
+        });
+      }
+
+      const btnPause = item.querySelector('.btn-pause-thread');
+      if (btnPause) {
+        btnPause.addEventListener('click', () => {
+          if (isPaused) {
+            window.zdolaAPI.creationResumeThread(threadKey);
+          } else {
+            window.zdolaAPI.creationPauseThread(threadKey);
+          }
+        });
+      }
+    }
+
+    window.zdolaAPI.onCreationLog(({ message, type }) => {
+      addCLog(message, type);
+      if (message.includes('CONCURRENT BATCH COMPLETE')) {
+        creationState.isCreating = false;
+        cEl.btnStartCreation.disabled = false;
+        cEl.btnStartCreation.textContent = '▶ Start Account Creation';
+        cEl.btnStopCreation.disabled = true;
+        cEl.cBottomStatus.textContent = 'Batch completed!';
+        loadCreationState();
+      }
+    });
+
+    // Profiles Rendering
+    function renderProfilesGrid() {
+      if (!creationState.profiles.length) {
+        cEl.profilesGridContainer.innerHTML = `
+          <div class="empty-state" style="padding: 40px 0; text-align: center; color: var(--text-muted); width: 100%;">
+            No profiles created yet. Use the "Create" tab to generate accounts automatically.
+          </div>
+        `;
+        return;
+      }
+
+      cEl.profilesGridContainer.innerHTML = '';
+      creationState.profiles.forEach(p => {
+        const card = document.createElement('div');
+        card.className = 'profile-card';
+        card.innerHTML = `
+          <div class="profile-card-top">
+            <div>
+              <div class="profile-title">${p.folderName}</div>
+              <div class="profile-email">✉ ${p.email} (${p.name || 'User'})</div>
+            </div>
+            <span class="activity-badge badge-live" style="font-size: 11px;">${p.cookiesCount || 0} cookies</span>
+          </div>
+          <div style="font-size: 11px; color: var(--mute);">Created: ${new Date(p.createdAt).toLocaleDateString()} ${new Date(p.createdAt).toLocaleTimeString()}</div>
+          <div class="profile-actions">
+            <button class="btn-subtle btn-xs btn-open-profile-chrome" data-id="${p.id}">Open Chrome</button>
+            <button class="btn-get-cookies btn-xs btn-sync-studio" data-id="${p.id}">+ Add to Studio</button>
+            <button class="btn-subtle btn-xs btn-delete-profile" data-id="${p.id}" style="color: var(--err);">Delete</button>
+          </div>
+        `;
+
+        card.querySelector('.btn-open-profile-chrome')?.addEventListener('click', () => {
+          window.zdolaAPI.creationOpenProfileBrowser(p.id);
+        });
+
+        card.querySelector('.btn-sync-studio')?.addEventListener('click', async (e) => {
+          e.target.textContent = 'Importing...';
+          const res = await window.zdolaAPI.creationSyncToStudio(p.id);
+          e.target.textContent = res.ok ? '✓ In Studio' : 'Failed';
+        });
+
+        card.querySelector('.btn-delete-profile')?.addEventListener('click', async () => {
+          await window.zdolaAPI.creationDeleteProfile(p.id);
+          loadCreationState();
+        });
+
+        cEl.profilesGridContainer.appendChild(card);
+      });
+    }
+
+    cEl.btnRefreshProfiles?.addEventListener('click', () => loadCreationState());
+    cEl.btnExportAllToStudio?.addEventListener('click', async () => {
+      let count = 0;
+      for (const p of creationState.profiles) {
+        const res = await window.zdolaAPI.creationSyncToStudio(p.id);
+        if (res.ok) count++;
+      }
+      alert(`Imported ${count} profiles into ZDola Studio!`);
+    });
+
+    // Settings actions
+    cEl.btnBrowseProfilesDir?.addEventListener('click', async () => {
+      const chosen = await window.zdolaAPI.creationBrowseProfilesDir();
+      if (chosen) cEl.cSettingProfilesDir.value = chosen;
+    });
+
+    cEl.btnLocateChromeExe?.addEventListener('click', async () => {
+      const chosen = await window.zdolaAPI.creationLocateChrome();
+      if (chosen) cEl.cSettingChromeExe.value = chosen;
+    });
+
+    cEl.driveBtns?.forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const shortcut = btn.dataset.shortcut;
+        const targetPath = shortcut === 'Documents' ? '~/Documents/Dola_Chrome_Profiles'
+          : shortcut === 'Movies' ? '~/Movies/Dola_Chrome_Profiles'
+          : '~/Downloads/Dola_Chrome_Profiles';
+        cEl.cSettingProfilesDir.value = targetPath;
+      });
+    });
+
+    cEl.btnSaveCreationSettings?.addEventListener('click', async () => {
+      const selectedBrowser = [...cEl.cBrowserRadios].find(r => r.checked)?.value || 'chrome';
+      const settings = {
+        profilesDir: cEl.cSettingProfilesDir.value,
+        chromeExecutable: cEl.cSettingChromeExe.value,
+        browserType: selectedBrowser,
+        otpTimeout: parseInt(cEl.cSettingOtpTimeout.value, 10) || 120,
+        resumeDelay: parseInt(cEl.cSettingResumeDelay.value, 10) || 20,
+        incognito: cEl.cSettingIncognito.checked,
+        emailProvider: cEl.cSettingEmailProvider.value,
+        firefoxRelayToken: cEl.cSettingRelayToken.value.trim(),
+        gmailForwardAddress: cEl.cSettingGmailForward.value.trim()
+      };
+      await window.zdolaAPI.creationSaveSettings(settings);
+      addCLog('ZDola Creation settings saved successfully.', 'success');
+      alert('Creation settings saved!');
+    });
+
+    async function loadCreationState() {
+      try {
+        const data = await window.zdolaAPI.creationGetState();
+        if (data) {
+          creationState.settings = data.settings || {};
+          creationState.profiles = data.profiles || [];
+
+          if (cEl.badgeAppMode) cEl.badgeAppMode.textContent = `Profiles: ${creationState.profiles.length}`;
+
+          if (cEl.cSettingProfilesDir) cEl.cSettingProfilesDir.value = data.settings.profilesDir || '';
+          if (cEl.cSettingChromeExe) cEl.cSettingChromeExe.value = data.settings.chromeExecutable || '';
+          if (cEl.cSettingOtpTimeout) cEl.cSettingOtpTimeout.value = data.settings.otpTimeout || 120;
+          if (cEl.cSettingResumeDelay) cEl.cSettingResumeDelay.value = data.settings.resumeDelay || 20;
+          if (cEl.cSettingIncognito) cEl.cSettingIncognito.checked = Boolean(data.settings.incognito);
+          if (cEl.cSettingEmailProvider) cEl.cSettingEmailProvider.value = data.settings.emailProvider || 'tempmail_io';
+          if (cEl.cSettingRelayToken) cEl.cSettingRelayToken.value = data.settings.firefoxRelayToken || '';
+          if (cEl.cSettingGmailForward) cEl.cSettingGmailForward.value = data.settings.gmailForwardAddress || '';
+
+          if (data.stats) {
+            if (cEl.cStatCpu) cEl.cStatCpu.textContent = `${data.stats.cpuPct}%`;
+            if (cEl.cStatRam) cEl.cStatRam.textContent = `${data.stats.ramPct}%`;
+            if (cEl.cStatRamUsed) cEl.cStatRamUsed.textContent = `${data.stats.usedMem}MB`;
+            if (cEl.cStatRamTotal) cEl.cStatRamTotal.textContent = `${data.stats.totalMem}MB`;
+            if (cEl.cStatRamAvail) cEl.cStatRamAvail.textContent = `${data.stats.freeMem}MB`;
+            if (cEl.cStatThreadsActive) cEl.cStatThreadsActive.textContent = `${data.stats.threadsActive}/${creationState.parallelThreads}`;
+          }
+
+          renderProfilesGrid();
+        }
+      } catch (e) {
+        console.error('Error loading creation state:', e);
+      }
+    }
+
+    loadCreationState();
+  }
+
   initTheme();
   updateQueueCount();
+  initCreationView();
 });

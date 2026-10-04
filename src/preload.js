@@ -37,6 +37,22 @@ contextBridge.exposeInMainWorld('zdolaAPI', {
   // External links
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
 
+  // ZDola Creation Suite APIs
+  creationStart: (payload) => ipcRenderer.invoke('creation-start', payload),
+  creationStop: () => ipcRenderer.invoke('creation-stop'),
+  creationPauseThread: (threadKey) => ipcRenderer.invoke('creation-pause-thread', threadKey),
+  creationResumeThread: (threadKey) => ipcRenderer.invoke('creation-resume-thread', threadKey),
+  creationPauseAll: () => ipcRenderer.invoke('creation-pause-all'),
+  creationResumeAll: () => ipcRenderer.invoke('creation-resume-all'),
+  creationGetCookies: (threadKey) => ipcRenderer.invoke('creation-get-cookies', threadKey),
+  creationGetState: () => ipcRenderer.invoke('creation-get-state'),
+  creationSaveSettings: (settings) => ipcRenderer.invoke('creation-save-settings', settings),
+  creationBrowseProfilesDir: () => ipcRenderer.invoke('creation-browse-profiles-dir'),
+  creationLocateChrome: () => ipcRenderer.invoke('creation-locate-chrome'),
+  creationOpenProfileBrowser: (profileId) => ipcRenderer.invoke('creation-open-profile-browser', profileId),
+  creationSyncToStudio: (profileId) => ipcRenderer.invoke('creation-sync-to-studio', profileId),
+  creationDeleteProfile: (profileId) => ipcRenderer.invoke('creation-delete-profile', profileId),
+
   // IPC Event Listeners
   onLog: (callback) => {
     const sub = (event, val) => callback(val);
@@ -57,5 +73,15 @@ contextBridge.exposeInMainWorld('zdolaAPI', {
     const sub = (event, val) => callback(val);
     ipcRenderer.on('queue-finished', sub);
     return () => ipcRenderer.removeListener('queue-finished', sub);
+  },
+  onCreationLog: (callback) => {
+    const sub = (event, val) => callback(val);
+    ipcRenderer.on('creation-log', sub);
+    return () => ipcRenderer.removeListener('creation-log', sub);
+  },
+  onCreationThreadUpdated: (callback) => {
+    const sub = (event, val) => callback(val);
+    ipcRenderer.on('creation-thread-updated', sub);
+    return () => ipcRenderer.removeListener('creation-thread-updated', sub);
   }
 });
