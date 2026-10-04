@@ -391,13 +391,22 @@
     <!-- TAB 1: CREATE VIEW (Frame 010 & 012) -->
     <div class="c-tab-page" id="pageCreate">
       <!-- Top Action Bar -->
-      <div class="creation-action-bar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-        <div style="display: flex; gap: 10px;">
+      <div class="creation-action-bar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
           <button class="btn btn-primary btn-start-creation" id="btnStartCreation">
             ▶ Start Account Creation
           </button>
           <button class="btn btn-subtle btn-stop-creation" id="btnStopCreation">
             ⏹ Stop
+          </button>
+          <button class="btn btn-subtle" id="btnProceedAllDola" title="Proceed all waiting threads to Dola.com">
+            Proceed to Dola
+          </button>
+          <button class="btn btn-subtle" id="btnRefreshAllDola" title="Refresh Dola.com in open Chrome windows">
+            Refresh Dola
+          </button>
+          <button class="btn btn-subtle" id="btnGetAllCookies" title="Extract cookies from all open Chrome windows">
+            🍪 Get all cookies
           </button>
         </div>
         <button class="btn btn-subtle" id="btnCloseAllChrome" style="font-size: 13px;">

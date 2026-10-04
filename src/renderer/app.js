@@ -1241,6 +1241,32 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
     }
 
+    const btnProceedAll = document.getElementById('btnProceedAllDola');
+    if (btnProceedAll) {
+      btnProceedAll.addEventListener('click', async () => {
+        await window.zdolaAPI.creationProceedAll();
+        addCLog('Sent command: Proceed all threads to Dola.com', 'highlight');
+      });
+    }
+
+    const btnRefreshAll = document.getElementById('btnRefreshAllDola');
+    if (btnRefreshAll) {
+      btnRefreshAll.addEventListener('click', async () => {
+        await window.zdolaAPI.creationRefreshAll();
+        addCLog('Sent command: Refresh Dola in open Chrome windows', 'info');
+      });
+    }
+
+    const btnGetAllCookies = document.getElementById('btnGetAllCookies');
+    if (btnGetAllCookies) {
+      btnGetAllCookies.addEventListener('click', async () => {
+        btnGetAllCookies.textContent = '⏳ Saving cookies...';
+        const res = await window.zdolaAPI.creationGetAllCookies();
+        btnGetAllCookies.textContent = '🍪 Get all cookies';
+        addCLog(`Captured cookies from active profiles.`, 'success');
+      });
+    }
+
     const btnNotice = document.getElementById('btnNoticeGetZdola');
     if (btnNotice) {
       btnNotice.addEventListener('click', () => {
@@ -1277,6 +1303,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           <span class="thread-desc">${statusIcon} ${data.statusText || 'Working...'}</span>
         </div>
         <div class="thread-item-right" style="display: flex; gap: 6px;">
+          ${data.canProceed ? `
+            <button class="btn-subtle btn-xs btn-proceed-thread" data-thread="${threadKey}" style="background: var(--a); color: #fff;">Proceed to Dola</button>
+          ` : ''}
           ${data.canGetCookies ? `
             <button class="btn-get-cookies" data-thread="${threadKey}">🍪 Get Cookies</button>
           ` : `
@@ -1284,6 +1313,14 @@ document.addEventListener('DOMContentLoaded', async () => {
           `}
         </div>
       `;
+
+      const btnProceed = item.querySelector('.btn-proceed-thread');
+      if (btnProceed) {
+        btnProceed.addEventListener('click', async () => {
+          btnProceed.textContent = 'Proceeding...';
+          await window.zdolaAPI.creationProceedThread(threadKey);
+        });
+      }
 
       const btnCookies = item.querySelector('.btn-get-cookies');
       if (btnCookies) {

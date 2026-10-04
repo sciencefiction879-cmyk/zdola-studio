@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { spawn } = require('child_process');
 const {
   parseCookieFile,
   parseCookieContent,
@@ -17,9 +18,40 @@ const {
 } = require('./dola-automation');
 const { CreationController } = require('./dola-creation');
 
+// Hardware acceleration & GPU sandbox stability flags on macOS
+app.commandLine.appendSwitch('disable-gpu-sandbox');
+app.commandLine.appendSwitch('no-sandbox');
+
 let mainWindow = null;
 let currentGeneration = null;
 let creationController = null;
+
+function detectChromeExecutable() {
+  if (creationController?.settings?.chromeExecutable && fs.existsSync(creationController.settings.chromeExecutable)) {
+    return creationController.settings.chromeExecutable;
+  }
+  if (process.platform === 'darwin') {
+    const macCandidates = [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+      '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'
+    ];
+    for (const c of macCandidates) {
+      if (fs.existsSync(c)) return c;
+    }
+  } else if (process.platform === 'win32') {
+    const winCandidates = [
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+      path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe')
+    ];
+    for (const c of winCandidates) {
+      if (fs.existsSync(c)) return c;
+    }
+  }
+  return null;
+}
 
 // User Data Store paths
 const userDataPath = app.getPath('userData');
@@ -109,12 +141,27 @@ function createWindow() {
     minHeight: 680,
     title: 'ZDola Studio',
     backgroundColor: '#1f1e1d',
+    show: false,
     titleBarStyle: 'hiddenInset',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true
     }
+  });
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+  });
+
+  mainWindow.webContents.on('console-message', (e, level, message, line, sourceId) => {
+    console.log(`[Renderer ${level}] ${message} (${path.basename(sourceId || '')}:${line})`);
+  });
+  mainWindow.webContents.on('did-fail-load', (e, code, desc, url) => {
+    console.error(`[did-fail-load] ${code}: ${desc} for ${url}`);
+  });
+  mainWindow.webContents.on('render-process-gone', (e, details) => {
+    console.error(`[render-process-gone] reason=${details.reason} exitCode=${details.exitCode}`);
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
@@ -258,14 +305,22 @@ ipcMain.handle('delete-accounts', (event, accountIds) => {
 // Open in Chrome / Browser
 ipcMain.handle('open-in-chrome', async (event, accountId) => {
   const acc = store.accounts.find(a => a.id === accountId);
-  if (acc) {
+  const chromePath = detectChromeExecutable();
+
+  if (acc && chromePath) {
     try {
-      const { win } = await createAccountBrowser(acc);
-      win.setSize(1280, 800);
-      win.center();
-      win.setTitle(`Dola AI - ${acc.name} (${acc.filename})`);
-      win.show();
-      await win.loadURL('https://www.dola.com/chat');
+      const profileDir = path.join(userDataPath, 'chrome_profiles', `acc_${acc.id}`);
+      if (!fs.existsSync(profileDir)) {
+        fs.mkdirSync(profileDir, { recursive: true });
+      }
+      const child = spawn(chromePath, [
+        `--user-data-dir=${profileDir}`,
+        '--no-first-run',
+        '--no-default-browser-check',
+        'https://www.dola.com/chat'
+      ], { detached: true, stdio: 'ignore' });
+      child.unref();
+      return true;
     } catch (_) {
       shell.openExternal('https://www.dola.com/chat');
     }
@@ -816,18 +871,49 @@ ipcMain.handle('creation-locate-chrome', async () => {
   return chosen;
 });
 
+ipcMain.handle('creation-proceed-all', () => {
+  creationController?.proceedAll();
+  return true;
+});
+
+ipcMain.handle('creation-proceed-thread', (event, threadKey) => {
+  creationController?.proceedThread(threadKey);
+  return true;
+});
+
+ipcMain.handle('creation-refresh-all', async () => {
+  await creationController?.refreshAll();
+  return true;
+});
+
+ipcMain.handle('creation-get-all-cookies', async () => {
+  return await creationController?.getAllCookies();
+});
+
 ipcMain.handle('creation-open-profile-browser', async (event, profileId) => {
   const profile = creationController?.profiles.find(p => p.id === profileId);
   if (!profile) return false;
-  const partition = `persist:profile_${profile.folderName}`;
-  const win = new BrowserWindow({
-    width: 880,
-    height: 680,
-    title: `ZDola Creation - ${profile.folderName}`,
-    webPreferences: { partition, contextIsolation: false, nodeIntegration: false }
-  });
-  win.loadURL('https://www.dola.com/chat');
-  return true;
+  const chromePath = detectChromeExecutable();
+  const folder = profile.folderPath || profile.profilePath;
+
+  if (chromePath && folder && fs.existsSync(folder)) {
+    try {
+      const child = spawn(chromePath, [
+        `--user-data-dir=${folder}`,
+        '--no-first-run',
+        '--no-default-browser-check',
+        'https://www.dola.com/chat'
+      ], { detached: true, stdio: 'ignore' });
+      child.unref();
+      return true;
+    } catch (_) {
+      shell.openExternal('https://www.dola.com/chat');
+      return true;
+    }
+  } else {
+    shell.openExternal('https://www.dola.com/chat');
+    return true;
+  }
 });
 
 ipcMain.handle('creation-sync-to-studio', (event, profileId) => {

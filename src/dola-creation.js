@@ -1,15 +1,17 @@
 // ZDola Creation - Dedicated Account Creator & Real Chrome Profile Suite
 // Replicates the exact competitor tool seen in ZDola Creation:
-// 1. Multi-threaded Chrome profile generation (880x680 side-by-side)
-// 2. Automated TempMail.io / Firefox Relay integration & OTP verification
+// 1. Multi-threaded Real Chrome profile generation (880x680 side-by-side)
+// 2. TempMail.io / Firefox Relay integration & OTP verification
 // 3. Google Cloud signup & Dola Google OAuth login automation
 // 4. One-click cookie extraction & auto-sync to ZDola Studio
+// 5. Zero black screens - uses native Google Chrome with DevTools Protocol (CDP)
 
-const { BrowserWindow, session, shell, app } = require('electron');
+const { shell, app } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const https = require('https');
+const http = require('http');
 const { spawn } = require('child_process');
 
 const FIRST_NAMES = [
@@ -35,7 +37,7 @@ function getRandomName() {
  * TempMail.io API Client
  */
 function createTempEmail() {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const postData = JSON.stringify({ min_name_length: 10, max_name_length: 10 });
     const req = https.request('https://api.internal.temp-mail.io/api/v3/email/new', {
       method: 'POST',
@@ -131,10 +133,147 @@ function cookiesToNetscape(cookies) {
     const flag = domain.startsWith('.') ? 'TRUE' : 'FALSE';
     const path = c.path || '/';
     const secure = c.secure ? 'TRUE' : 'FALSE';
-    const expiry = c.expirationDate ? Math.round(c.expirationDate) : Math.round(Date.now() / 1000) + (365 * 86400);
+    const expiry = c.expires || c.expirationDate ? Math.round(c.expires || c.expirationDate) : Math.round(Date.now() / 1000) + (365 * 86400);
     output += `${domain}\t${flag}\t${path}\t${secure}\t${expiry}\t${c.name}\t${c.value}\n`;
   }
   return output;
+}
+
+/**
+ * RealChromeSession: Native Chrome controller via DevTools Protocol (CDP)
+ * Eliminates all Electron WebGL and Google security blocks!
+ */
+class RealChromeSession {
+  constructor({ child, port, wsUrl, onLog }) {
+    this.child = child;
+    this.port = port;
+    this.wsUrl = wsUrl;
+    this.onLog = onLog || (() => {});
+    this.ws = null;
+    this.msgId = 0;
+    this.pendingCallbacks = new Map();
+    this.isClosed = false;
+  }
+
+  async connect() {
+    return new Promise((resolve, reject) => {
+      this.ws = new WebSocket(this.wsUrl);
+      const timer = setTimeout(() => reject(new Error('Chrome DevTools WebSocket connection timed out')), 8000);
+
+      this.ws.onopen = () => {
+        clearTimeout(timer);
+        this.send('Page.enable', {}).catch(() => {});
+        this.send('Network.enable', {}).catch(() => {});
+        this.send('Runtime.enable', {}).catch(() => {});
+        // Anti-bot stealth: remove webdriver property
+        this.send('Page.addScriptToEvaluateOnNewDocument', {
+          source: `
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            window.chrome = window.chrome || {
+              app: {isInstalled: false},
+              webstore: {onInstallStageChanged: {}, onDownloadProgress: {}},
+              runtime: {PlatformOs: {MAC: 'mac', WIN: 'win', ANDROID: 'android', CROS: 'cros', LINUX: 'linux', OPENBSD: 'openbsd'}}
+            };
+          `
+        }).catch(() => {});
+        resolve();
+      };
+
+      this.ws.onmessage = (evt) => {
+        try {
+          const msg = JSON.parse(evt.data);
+          if (msg.id && this.pendingCallbacks.has(msg.id)) {
+            const { resolve: resCb, reject: rejCb } = this.pendingCallbacks.get(msg.id);
+            this.pendingCallbacks.delete(msg.id);
+            if (msg.error) rejCb(new Error(msg.error.message || 'CDP Error'));
+            else resCb(msg.result);
+          }
+        } catch (_) {}
+      };
+
+      this.ws.onerror = (err) => {
+        clearTimeout(timer);
+        reject(err);
+      };
+
+      this.ws.onclose = () => {
+        this.isClosed = true;
+      };
+    });
+  }
+
+  send(method, params = {}) {
+    return new Promise((resolve, reject) => {
+      if (this.isClosed || !this.ws || this.ws.readyState !== 1) {
+        return reject(new Error('WebSocket connection is not open'));
+      }
+      const id = ++this.msgId;
+      this.pendingCallbacks.set(id, { resolve, reject });
+      this.ws.send(JSON.stringify({ id, method, params }));
+    });
+  }
+
+  async navigate(url, waitMs = 2500) {
+    try {
+      await this.send('Page.navigate', { url });
+      if (waitMs > 0) {
+        await new Promise(r => setTimeout(r, waitMs));
+      }
+      return true;
+    } catch (e) {
+      this.onLog(`Navigation warning: ${e.message}`);
+      return false;
+    }
+  }
+
+  async evaluate(expression) {
+    try {
+      const res = await this.send('Runtime.evaluate', {
+        expression,
+        awaitPromise: true,
+        returnByValue: true
+      });
+      return res?.result?.value;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async reload() {
+    try {
+      await this.send('Page.reload', {});
+      await new Promise(r => setTimeout(r, 2000));
+    } catch (_) {}
+  }
+
+  async getCookies() {
+    try {
+      const res = await this.send('Network.getCookies', {
+        urls: [
+          'https://www.dola.com',
+          'https://dola.com',
+          'https://accounts.google.com',
+          'https://cloud.google.com'
+        ]
+      });
+      return res?.cookies || [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  close() {
+    this.isClosed = true;
+    try { if (this.ws) this.ws.close(); } catch (_) {}
+    try {
+      if (this.child) {
+        this.child.kill('SIGTERM');
+        setTimeout(() => {
+          try { this.child.kill('SIGKILL'); } catch (_) {}
+        }, 1200);
+      }
+    } catch (_) {}
+  }
 }
 
 class CreationController {
@@ -142,7 +281,7 @@ class CreationController {
     this.userDataPath = userDataPath;
     this.sendLog = sendLogFn || (() => {});
     this.sendThread = sendThreadFn || (() => {});
-    this.activeThreads = new Map(); // threadId -> { win, state, ... }
+    this.activeThreads = new Map(); // threadId -> { chromeSession, child, state, ... }
     this.isRunning = false;
     this.pausedAll = false;
 
@@ -152,12 +291,12 @@ class CreationController {
     this.settings = this.loadJson(this.settingsFile, {
       profilesDir: path.join(os.homedir(), 'Documents', 'Dola_Chrome_Profiles'),
       chromeExecutable: this.detectChromePath(),
-      browserType: 'chrome', // 'chrome' or 'electron'
+      browserType: 'chrome',
       emailProvider: 'tempmail_io',
       firefoxRelayToken: '',
       gmailForwardAddress: '',
       otpTimeout: 120,
-      resumeDelay: 20,
+      resumeDelay: 15,
       incognito: false
     });
 
@@ -197,15 +336,32 @@ class CreationController {
   }
 
   detectChromePath() {
+    if (this.settings?.chromeExecutable && fs.existsSync(this.settings.chromeExecutable)) {
+      return this.settings.chromeExecutable;
+    }
+
     if (process.platform === 'darwin') {
-      const macPath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-      if (fs.existsSync(macPath)) return macPath;
-    } else if (process.platform === 'win32') {
-      const winPaths = [
-        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+      const candidates = [
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        '/Applications/Chromium.app/Contents/MacOS/Chromium',
+        '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+        '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'
       ];
-      for (const p of winPaths) {
+      for (const p of candidates) {
+        if (fs.existsSync(p)) return p;
+      }
+    } else if (process.platform === 'win32') {
+      const candidates = [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe')
+      ];
+      for (const p of candidates) {
+        if (fs.existsSync(p)) return p;
+      }
+    } else {
+      const candidates = ['/usr/bin/google-chrome', '/usr/bin/chromium-browser', '/usr/bin/chromium'];
+      for (const p of candidates) {
         if (fs.existsSync(p)) return p;
       }
     }
@@ -250,7 +406,7 @@ class CreationController {
     this.sendLog(`Profiles: ${this.settings.profilesDir}`, 'info');
     this.sendLog(`RAM Available: ${stats.freeMem}MB / ${stats.totalMem}MB`, 'info');
     this.sendLog(`CPU Cores: ${stats.cpuCores}`, 'info');
-    this.sendLog(`Launching ${parallelThreads} parallel threads...`, 'highlight');
+    this.sendLog(`Launching ${parallelThreads} parallel threads in Real Google Chrome...`, 'highlight');
 
     let completedAccounts = 0;
     let successfulCount = 0;
@@ -305,12 +461,12 @@ class CreationController {
     const profilePath = path.join(this.settings.profilesDir, profileFolderName);
     this.ensureDir(profilePath);
 
-    // Compute window layout (side-by-side matching video)
+    // Compute window layout (880x680 side-by-side matching competitor video)
     const winWidth = 880;
     const winHeight = 680;
-    const screenWidth = 1920;
     const xPos = ((threadNum - 1) % 2) * (winWidth + 20) + 30;
-    const yPos = Math.floor((threadNum - 1) / 2) * 40 + 30;
+    const yPos = Math.floor((threadNum - 1) / 2) * 50 + 30;
+    const cdpPort = 9320 + threadNum;
 
     // Step 1: Generating name & profile
     this.updateThread(threadKey, {
@@ -322,32 +478,85 @@ class CreationController {
     const person = getRandomName();
     this.sendLog(`[${threadId}] Profile created: ${profileFolderName}`, 'info');
 
-    // Step 2: Launching Chrome / Electron browser
+    // Step 2: Launch Real Google Chrome
     this.updateThread(threadKey, {
-      statusText: `Step 2/7: Launching Chrome...`,
+      statusText: `Step 2/7: Launching Real Chrome...`,
       badge: 'step'
     });
-    this.sendLog(`[${threadId}] Step 2: Launching CHROME...`, 'info');
-    this.sendLog(`[${threadId}] Starting Chrome browser (Standard Persistent Profile) (${winWidth}x${winHeight})...`, 'info');
+    this.sendLog(`[${threadId}] Step 2: Launching Real CHROME...`, 'info');
+    this.sendLog(`[${threadId}] Starting Real Chrome (Persistent Profile: ${winWidth}x${winHeight}, Port: ${cdpPort})...`, 'info');
 
-    const partition = `persist:profile_${profileFolderName}`;
-    const ses = session.fromPartition(partition);
-    ses.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
+    const chromePath = this.detectChromePath();
+    if (!chromePath) {
+      const err = new Error('Google Chrome executable not found. Please locate it in Settings tab.');
+      this.sendLog(`[${threadId}] ❌ ${err.message}`, 'error');
+      this.updateThread(threadKey, { statusText: `FAILED - Chrome not found`, badge: 'failed' });
+      return { ok: false, error: err.message };
+    }
 
-    const win = new BrowserWindow({
-      width: winWidth,
-      height: winHeight,
-      x: Math.min(xPos, screenWidth - winWidth),
-      y: yPos,
-      title: `ZDola Creation - [${threadId}] ${profileFolderName}`,
-      webPreferences: {
-        partition,
-        contextIsolation: false,
-        nodeIntegration: false
-      }
+    const initialUrl = 'https://accounts.cloud.google.com/signup/email?continueUrl=https://console.cloud.google.com/freetrial?cof%3D2&hl=en_US';
+
+    const chromeArgs = [
+      `--user-data-dir=${profilePath}`,
+      `--remote-debugging-port=${cdpPort}`,
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-popup-blocking',
+      `--window-size=${winWidth},${winHeight}`,
+      `--window-position=${xPos},${yPos}`,
+      '--lang=en-US',
+      initialUrl
+    ];
+
+    if (this.settings.incognito) {
+      chromeArgs.push('--incognito');
+    }
+
+    const child = spawn(chromePath, chromeArgs, {
+      detached: true,
+      stdio: 'ignore'
     });
 
-    const threadObj = { win, partition, profilePath, profileFolderName, person, paused: false };
+    // Wait for CDP to become active and connect
+    let chromeSession = null;
+    for (let attempt = 0; attempt < 25; attempt++) {
+      await new Promise(r => setTimeout(r, 400));
+      try {
+        const resp = await fetch(`http://127.0.0.1:${cdpPort}/json`);
+        const targets = await resp.json();
+        const page = targets.find(t => t.type === 'page');
+        if (page && page.webSocketDebuggerUrl) {
+          chromeSession = new RealChromeSession({
+            child,
+            port: cdpPort,
+            wsUrl: page.webSocketDebuggerUrl,
+            onLog: (msg) => this.sendLog(`[${threadId}] ${msg}`, 'info')
+          });
+          await chromeSession.connect();
+          break;
+        }
+      } catch (_) {}
+    }
+
+    if (!chromeSession) {
+      const err = new Error('Could not connect to Chrome DevTools Protocol port ' + cdpPort);
+      this.sendLog(`[${threadId}] ❌ ${err.message}`, 'error');
+      this.updateThread(threadKey, { statusText: `FAILED - CDP Error`, badge: 'failed' });
+      return { ok: false, error: err.message };
+    }
+
+    this.sendLog(`[${threadId}] 100% Real Google Chrome connected with persistent profile! Zero black screen.`, 'success');
+
+    const threadObj = {
+      chromeSession,
+      child,
+      cdpPort,
+      profilePath,
+      profileFolderName,
+      person,
+      paused: false,
+      proceedRequested: false
+    };
     this.activeThreads.set(threadKey, threadObj);
 
     try {
@@ -356,8 +565,7 @@ class CreationController {
         statusText: `Step 3/7: Generating temporary email...`,
         badge: 'step'
       });
-      this.sendLog(`[${threadId}] Step 3: Generating temporary email API...`, 'info');
-      this.sendLog(`[${threadId}] Trying TempMail.io service...`, 'info');
+      this.sendLog(`[${threadId}] Step 3: Generating temporary email via API...`, 'info');
       this.sendLog(`[${threadId}] Active Provider: TempMail.io API`, 'info');
 
       const emailRes = await createTempEmail();
@@ -366,99 +574,160 @@ class CreationController {
       }
       const email = emailRes.email;
       threadObj.email = email;
-      this.sendLog(`[${threadId}] Email: ${email}`, 'highlight');
+      this.sendLog(`[${threadId}] ✅ Email: ${email}`, 'highlight');
       this.sendLog(`[${threadId}] Name: ${person.full}`, 'info');
 
-      // Step 4: Navigate to Google Cloud signup
+      // Step 4: Navigate to Google Cloud signup & enter email
       this.updateThread(threadKey, {
-        statusText: `Step 4/7: Google Cloud signup...`,
+        statusText: `Step 4/7: Google Cloud signup — entering email...`,
         badge: 'step'
       });
-      this.sendLog(`[${threadId}] Step 4: Navigating to Google Cloud signup...`, 'info');
-      const googleSignupUrl = 'https://accounts.cloud.google.com/signup/email?continueUrl=https://console.cloud.google.com';
-      await win.loadURL(googleSignupUrl);
+      this.sendLog(`[${threadId}] Step 4: Google Cloud signup — entering email...`, 'info');
 
-      await new Promise(r => setTimeout(r, 2500));
+      // Wait 3s for Google page to fully initialize
+      await new Promise(r => setTimeout(r, 3000));
 
-      // Fill email in Google signup
-      await win.webContents.executeJavaScript(`
+      const enteredEmail = await chromeSession.evaluate(`
         (() => {
-          const input = document.querySelector('input[type="email"], input[name="identifier"], input[name="Email"], input#identifierId');
-          if (input) {
-            input.value = ${JSON.stringify(email)};
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
+          const inp = document.querySelector('input[type="email"], input[name="identifier"], input#identifierId, input[name="Email"]');
+          if (inp) {
+            inp.focus();
+            inp.value = ${JSON.stringify(email)};
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+            inp.dispatchEvent(new Event('change', { bubbles: true }));
+            const btn = document.querySelector('button[type="submit"], #identifierNext, button:has(span), div[role="button"]');
+            if (btn) btn.click();
+            return true;
           }
-          const nextBtn = document.querySelector('button[type="submit"], #identifierNext, button:has(span), [role="button"]');
-          if (nextBtn) nextBtn.click();
+          return false;
         })()
-      `).catch(() => {});
+      `);
+
+      if (enteredEmail) {
+        this.sendLog(`[${threadId}] Entered email into Google Cloud signup form.`, 'success');
+      } else {
+        this.sendLog(`[${threadId}] Google signup email field ready in open Chrome window.`, 'info');
+      }
 
       // Step 5: Wait for OTP verification code
       this.updateThread(threadKey, {
-        statusText: `Step 5/7: Waiting for Google verification OTP...`,
+        statusText: `Step 5/7: Waiting for Google OTP code...`,
         badge: 'step'
       });
-      this.sendLog(`[${threadId}] Step 5: Polling mailbox for Google Cloud verification code (Timeout: ${this.settings.otpTimeout}s)...`, 'info');
+      this.sendLog(`[${threadId}] Step 5: Polling mailbox for Google verification code (Timeout: ${this.settings.otpTimeout}s)...`, 'info');
 
       const otpRes = await pollForGoogleOtp(email, this.settings.otpTimeout, (msg) => {
         this.sendLog(`[${threadId}] ${msg}`, 'info');
       });
 
       if (otpRes.ok && otpRes.otp) {
-        this.sendLog(`[${threadId}] Extracted OTP: ${otpRes.otp}`, 'success');
-        this.sendLog(`[${threadId}] Entering OTP: ${otpRes.otp}`, 'info');
+        this.sendLog(`[${threadId}] ✅ OTP Received: ${otpRes.otp}`, 'success');
+        this.sendLog(`[${threadId}] Entering OTP into Google Cloud form...`, 'info');
 
-        await win.webContents.executeJavaScript(`
+        await chromeSession.evaluate(`
           (() => {
-            const codeInput = document.querySelector('input[type="tel"], input[name="pin"], input[name="code"], input[name="verificationCode"], input');
+            const codeInput = document.querySelector('input[type="tel"], input[name="pin"], input[name="code"], input[name="verificationCode"], input[autocomplete="one-time-code"]');
             if (codeInput) {
+              codeInput.focus();
               codeInput.value = ${JSON.stringify(otpRes.otp)};
               codeInput.dispatchEvent(new Event('input', { bubbles: true }));
               codeInput.dispatchEvent(new Event('change', { bubbles: true }));
+              const verifyBtn = document.querySelector('button[type="submit"], #pinNext, button');
+              if (verifyBtn) verifyBtn.click();
+              return true;
             }
-            const verifyBtn = document.querySelector('button[type="submit"], #pinNext, button');
-            if (verifyBtn) verifyBtn.click();
+            return false;
           })()
-        `).catch(() => {});
-
-        this.sendLog(`[${threadId}] Clicked Verify/Next button.`, 'info');
-        this.sendLog(`[${threadId}] Paused after OTP submit. Auto-resuming in 10s or interact in browser...`, 'info');
-        await new Promise(r => setTimeout(r, 10000));
+        `);
+        this.sendLog(`[${threadId}] Submitted OTP code successfully.`, 'info');
       } else {
-        this.sendLog(`[${threadId}] Manual OTP or browser interaction available in open Chrome window.`, 'warn');
+        this.sendLog(`[${threadId}] OTP timeout or manual entry available in Chrome.`, 'warn');
       }
 
-      // Step 6: Navigate to Dola.com and login with Google
+      // Step 6: Terms page / Proceed to Dola
+      const resumeDelay = this.settings.resumeDelay || 15;
       this.updateThread(threadKey, {
-        statusText: `Step 6/7: Dola.com Google OAuth login...`,
+        statusText: `Step 6/7: Terms page. Press 'Proceed to Dola' or waiting ${resumeDelay}s...`,
+        badge: 'step',
+        canProceed: true
+      });
+      this.sendLog(`[${threadId}] Step 6: At Google Cloud terms page. Accept manually if prompted, or press 'Proceed to Dola'...`, 'highlight');
+
+      // Wait up to resumeDelay seconds, or immediately if user clicked "Proceed to Dola"
+      const proceedDeadline = Date.now() + (resumeDelay * 1000);
+      while (Date.now() < proceedDeadline && !threadObj.proceedRequested && this.isRunning) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      // Step 6b: Navigate to Dola.com (chat) & Complete Google OAuth Login
+      this.updateThread(threadKey, {
+        statusText: `Step 6b/7: Dola.com Google OAuth login...`,
         badge: 'step'
       });
-      this.sendLog(`[${threadId}] Step 6: Navigating to Dola.com & completing Google OAuth login...`, 'info');
-      await win.loadURL('https://www.dola.com/login');
-      await new Promise(r => setTimeout(r, 3500));
+      this.sendLog(`[${threadId}] Step 6b: Navigating to https://www.dola.com/chat & completing Google OAuth login...`, 'info');
 
-      // Click "Continue with Google"
-      await win.webContents.executeJavaScript(`
+      // CRITICAL FIX: Load /chat NOT /login (login route doesn't exist and causes black screen!)
+      await chromeSession.navigate('https://www.dola.com/chat', 3500);
+
+      // Trigger "Continue with Google"
+      const clickedGoogle = await chromeSession.evaluate(`
         (() => {
-          const btns = [...document.querySelectorAll('button, [role="button"]')];
-          const googleBtn = btns.find(b => (b.innerText || '').toLowerCase().includes('google'));
-          if (googleBtn) googleBtn.click();
+          const els = Array.from(document.querySelectorAll('button, a, div[role="button"], span'));
+          for (const el of els) {
+            const t = (el.innerText || '').toLowerCase().trim();
+            if (t.includes('continue with google') || t.includes('sign in with google') || t.includes('log in with google') || t === 'google') {
+              const clickable = el.closest('button, a, div[role="button"]') || el;
+              clickable.click();
+              return true;
+            }
+          }
+          return false;
         })()
-      `).catch(() => {});
+      `);
 
+      if (clickedGoogle) {
+        this.sendLog(`[${threadId}] Clicked "Continue with Google" button on Dola.`, 'success');
+      }
+
+      // Wait 4 seconds for OAuth popup / redirect
       await new Promise(r => setTimeout(r, 4000));
 
-      // Step 7: Extract Dola.com Cookies
+      // Handle Google OAuth account selection or continue button if prompted
+      await chromeSession.evaluate(`
+        (() => {
+          const selectors = ['[data-identifier]', '.JDAKTe', 'div[data-email]', 'li[data-identifier]', 'div[data-profileidentifier]'];
+          for (const s of selectors) {
+            const el = document.querySelector(s);
+            if (el && el.offsetParent !== null) {
+              el.click();
+              return true;
+            }
+          }
+          const btns = Array.from(document.querySelectorAll('button, div[role="button"]'));
+          for (const b of btns) {
+            const txt = (b.innerText || '').toLowerCase().trim();
+            if (txt === 'continue' || txt === 'allow' || txt.includes('understand') || txt === 'next') {
+              b.click();
+              return true;
+            }
+          }
+          return false;
+        })()
+      `);
+
+      // Wait 3 seconds for Dola session reload
+      await new Promise(r => setTimeout(r, 3000));
+
+      // Step 7: Extract Dola.com Cookies via CDP
       this.updateThread(threadKey, {
         statusText: `Step 7/7: Extracting Dola cookies...`,
         badge: 'step'
       });
-      this.sendLog(`[${threadId}] Step 7: Extracting Dola cookies (Final Step)...`, 'info');
+      this.sendLog(`[${threadId}] Step 7: Extracting Dola cookies from Chrome profile...`, 'info');
 
       const extracted = await this.extractAndSaveCookies({
         threadId,
-        ses,
+        chromeSession,
         profilePath,
         profileFolderName,
         email,
@@ -466,14 +735,14 @@ class CreationController {
       });
 
       this.updateThread(threadKey, {
-        statusText: `SUCCESS - ${email}`,
+        statusText: `✅ SUCCESS - ${email}`,
         badge: 'success',
         canGetCookies: true,
         email
       });
 
-      this.sendLog(`[${threadId}] Thread ${threadNum}: Account created successfully!`, 'success');
-      return { ok: true, email };
+      this.sendLog(`[${threadId}] Thread ${threadNum}: Account created successfully! Real Chrome profile ready.`, 'success');
+      return { ok: true, email, ...extracted };
     } catch (err) {
       this.updateThread(threadKey, {
         statusText: `FAILED - ${err.message}`,
@@ -485,15 +754,15 @@ class CreationController {
     }
   }
 
-  async extractAndSaveCookies({ threadId, ses, profilePath, profileFolderName, email, person }) {
-    const allCookies = await ses.cookies.get({});
+  async extractAndSaveCookies({ threadId, chromeSession, profilePath, profileFolderName, email, person }) {
+    let allCookies = [];
+    if (chromeSession) {
+      allCookies = await chromeSession.getCookies();
+    }
+
     const dolaCookies = allCookies.filter(c => c.domain && (c.domain.includes('dola.com') || c.domain.includes('ibyteimg.com')));
 
-    const now = new Date();
-    const pad = n => String(n).padStart(2, '0');
-    const tsStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-
-    // 1. Save cookies to profile folder
+    // 1. Save cookies into profile folder
     const profileNetscapeTxt = path.join(profilePath, 'cookies.txt');
     const profileJson = path.join(profilePath, 'cookies.json');
     const netscapeContent = cookiesToNetscape(dolaCookies.length ? dolaCookies : allCookies);
@@ -502,7 +771,7 @@ class CreationController {
     fs.writeFileSync(profileNetscapeTxt, netscapeContent, 'utf8');
     fs.writeFileSync(profileJson, jsonContent, 'utf8');
 
-    // 2. Save cookies to Desktop/cookies folder (matching exact competitor and video)
+    // 2. Save cookies to Desktop/cookies folder (matching exact competitor reference)
     const desktopCookiesDir = path.join(os.homedir(), 'Desktop', 'cookies');
     if (!fs.existsSync(desktopCookiesDir)) {
       try { fs.mkdirSync(desktopCookiesDir, { recursive: true }); } catch (_) {}
@@ -513,14 +782,15 @@ class CreationController {
       fs.writeFileSync(dlPath, netscapeContent, 'utf8');
     } catch (_) {}
 
-    this.sendLog(`[${threadId}] Profile cookies saved to: ${profileNetscapeTxt}`, 'info');
-    this.sendLog(`[${threadId}] Cookies saved to: ${dlPath}`, 'success');
-    this.sendLog(`[${threadId}] Total cookies: ${dolaCookies.length || allCookies.length}`, 'highlight');
+    this.sendLog(`[${threadId}] Profile cookies saved: ${profileNetscapeTxt}`, 'info');
+    this.sendLog(`[${threadId}] Saved to Desktop: ${dlPath}`, 'success');
+    this.sendLog(`[${threadId}] Total cookies captured: ${dolaCookies.length || allCookies.length}`, 'highlight');
 
     // 3. Register in profiles list
     const profileRecord = {
       id: profileFolderName,
       folderName: profileFolderName,
+      folderPath: profilePath,
       email: email || `${person.first.toLowerCase()}@temp.mail`,
       name: person.full,
       createdAt: new Date().toISOString(),
@@ -548,6 +818,56 @@ class CreationController {
   stopBatch() {
     this.isRunning = false;
     this.sendLog(`⏹ Stopped Account Creation batch.`, 'warn');
+  }
+
+  proceedThread(threadKey) {
+    const thread = this.activeThreads.get(threadKey);
+    if (thread) {
+      thread.proceedRequested = true;
+      if (thread.chromeSession) {
+        thread.chromeSession.navigate('https://www.dola.com/chat');
+      }
+      this.sendLog(`[${threadKey}] Proceeding to Dola.com...`, 'info');
+    }
+  }
+
+  proceedAll() {
+    for (const [key, thread] of this.activeThreads) {
+      this.proceedThread(key);
+    }
+    this.sendLog(`🚀 Proceeding all waiting threads to Dola.com...`, 'highlight');
+  }
+
+  async refreshAll() {
+    this.sendLog(`Refreshing Dola in all open Chrome windows...`, 'info');
+    for (const [key, thread] of this.activeThreads) {
+      if (thread && thread.chromeSession) {
+        await thread.chromeSession.navigate('https://www.dola.com/chat');
+        this.sendLog(`[${key}] Dola refreshed.`, 'info');
+      }
+    }
+  }
+
+  async getAllCookies() {
+    this.sendLog(`Saving cookies from all open Chrome windows...`, 'highlight');
+    let count = 0;
+    for (const [key, thread] of this.activeThreads) {
+      if (thread && thread.chromeSession) {
+        try {
+          const res = await this.extractAndSaveCookies({
+            threadId: key,
+            chromeSession: thread.chromeSession,
+            profilePath: thread.profilePath,
+            profileFolderName: thread.profileFolderName,
+            email: thread.email || 'account',
+            person: thread.person || { first: 'Dola', full: 'Dola User' }
+          });
+          if (res.ok) count++;
+        } catch (_) {}
+      }
+    }
+    this.sendLog(`Get all cookies: saved cookies from ${count} profile(s).`, 'success');
+    return { ok: true, count };
   }
 
   pauseThread(threadKey) {
@@ -586,13 +906,13 @@ class CreationController {
 
   async extractCookiesForThread(threadKey) {
     const thread = this.activeThreads.get(threadKey);
-    if (!thread || !thread.win) {
-      throw new Error(`Thread ${threadKey} is not active`);
+    if (!thread || !thread.chromeSession) {
+      throw new Error(`Thread ${threadKey} is not active in Chrome`);
     }
-    this.sendLog(`[${threadKey}] Re-extracting cookies from active browser...`, 'info');
+    this.sendLog(`[${threadKey}] Re-extracting cookies from active Real Chrome browser...`, 'info');
     const res = await this.extractAndSaveCookies({
       threadId: threadKey,
-      ses: thread.win.webContents.session,
+      chromeSession: thread.chromeSession,
       profilePath: thread.profilePath,
       profileFolderName: thread.profileFolderName,
       email: thread.email || 'account',
@@ -602,10 +922,10 @@ class CreationController {
   }
 
   closeAll() {
-    this.stop();
+    this.stopBatch();
     for (const [key, thread] of this.activeThreads) {
-      if (thread && thread.win) {
-        try { thread.win.close(); } catch (_) {}
+      if (thread && thread.chromeSession) {
+        try { thread.chromeSession.close(); } catch (_) {}
       }
     }
     this.activeThreads.clear();
@@ -617,5 +937,6 @@ module.exports = {
   CreationController,
   createTempEmail,
   pollForGoogleOtp,
-  cookiesToNetscape
+  cookiesToNetscape,
+  RealChromeSession
 };

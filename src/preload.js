@@ -41,6 +41,10 @@ contextBridge.exposeInMainWorld('zdolaAPI', {
   // ZDola Creation Suite APIs
   creationStart: (payload) => ipcRenderer.invoke('creation-start', payload),
   creationStop: () => ipcRenderer.invoke('creation-stop'),
+  creationProceedAll: () => ipcRenderer.invoke('creation-proceed-all'),
+  creationProceedThread: (threadKey) => ipcRenderer.invoke('creation-proceed-thread', threadKey),
+  creationRefreshAll: () => ipcRenderer.invoke('creation-refresh-all'),
+  creationGetAllCookies: () => ipcRenderer.invoke('creation-get-all-cookies'),
   creationCloseAll: () => ipcRenderer.invoke('creation-close-all'),
   creationPauseThread: (threadKey) => ipcRenderer.invoke('creation-pause-thread', threadKey),
   creationResumeThread: (threadKey) => ipcRenderer.invoke('creation-resume-thread', threadKey),
